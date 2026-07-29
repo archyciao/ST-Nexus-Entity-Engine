@@ -1,0 +1,69 @@
+// 一、文件级总览
+// 文件功能：定义一个 Component 的机器结构，并展示正式 Schema 应如何说明字段。
+// 架构位置：Schema 位于数据结构层；Registry 补充权限和权威性，Validator 执行校验。
+// 输入：等待校验的 Component 对象。
+// 运作方式：先选择精确版本，再检查外壳、字段类型、必填项、范围和未知字段。
+// 输出：结构合法的 Component，或者带字段路径的结构化错误。
+// 不负责：不判断世界行为是否合理，不决定 Event 是否成立，也不直接写入数据库。
+// 阅读顺序：先看本段总览，再看结构分区，最后查看每个字段上方的中文说明。
+
+{
+  // 二、结构级说明
+  // 声明正式 Schema 所采用的标准版本。
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+
+  // Schema 的稳定身份；正式文件必须更换为真实 Component 和版本。
+  "$id": "urn:world-simulator:schema:template:component:0.1.0",
+
+  // 供人工、AI 和工具界面显示的名称与用途。
+  "title": "Component Schema 中文说明模板",
+  "description": "定义示例 Component 的结构、字段含义和校验边界。",
+
+  // 顶层必须是对象。
+  "type": "object",
+
+  // 三、字段级说明
+  "properties": {
+    // 当前实例对应的 Component Schema 版本，不是 Entity revision。
+    "schema_version": {
+      "const": "0.1.0",
+      "description": "Component 数据结构版本。"
+    },
+
+    // 只有 Registry 声明 allow_disable 为 true 时才允许该字段。
+    "enabled": {
+      "type": "boolean",
+      "description": "当前 Component 是否启用。"
+    },
+
+    // Component 实际业务数据；宿主 Entity 的 id、type 和 description 不放在这里。
+    "data": {
+      "type": "object",
+      "properties": {
+        // 示例业务字段。正式设计应改为语义明确的 snake_case 名称。
+        "example_field": {
+          "type": "string",
+          "minLength": 1,
+          "description": "说明字段是什么、由谁更新以及空值代表什么。"
+        }
+      },
+
+      // 创建合法实例时必须存在的业务字段。
+      "required": [
+        "example_field"
+      ],
+
+      // AI 生成 Schema 未声明的字段时直接拒绝。
+      "additionalProperties": false
+    }
+  },
+
+  // 所有正式 Component 都必须具有版本和业务数据。
+  "required": [
+    "schema_version",
+    "data"
+  ],
+
+  // 顶层同样拒绝未声明字段。
+  "additionalProperties": false
+}

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:core:current_location_reference:0.1.0",
+  "title": "CurrentLocationReferenceComponent 0.1.0",
+  "description": "保存 Character 或 Item 当前所在 Location 的权威直接引用。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "location_ref": {
+              "allOf": [
+                {
+                  "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": { "const": "location" }
+                  }
+                }
+              ],
+              "description": "当前位置引用，只允许指向 Location。"
+            }
+          },
+          "required": ["location_ref"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

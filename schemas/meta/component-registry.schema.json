@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:meta:component-registry:0.1.0",
+  "title": "Component Registry",
+  "description": "Component 类别、宿主、权限、权威性、版本、纠错和迁移元信息。",
+  "type": "object",
+  "properties": {
+    "registry_version": { "$ref": "#/$defs/semver" },
+    "schema_dialect": {
+      "const": "https://json-schema.org/draft/2020-12/schema"
+    },
+    "correction_policy": { "$ref": "#/$defs/correction_policy" },
+    "components": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/component" }
+    }
+  },
+  "required": ["registry_version", "schema_dialect", "correction_policy", "components"],
+  "additionalProperties": false,
+  "$defs": {
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$"
+    },
+    "path": {
+      "type": "string",
+      "pattern": "^/.*"
+    },
+    "role": {
+      "enum": ["ai", "user", "system", "resolver", "projector", "admin", "migration"]
+    },
+    "correction_policy": {
+      "type": "object",
+      "properties": {
+        "normalize_unicode": { "type": "boolean" },
+        "normalize_key_style": { "type": "boolean" },
+        "fuzzy_key_matching": { "type": "boolean" },
+        "fuzzy_threshold": { "type": "number", "minimum": 0.5, "maximum": 1.0 },
+        "minimum_margin": { "type": "number", "minimum": 0.0, "maximum": 0.5 },
+        "protected_value_field_names": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "normalize_unicode",
+        "normalize_key_style",
+        "fuzzy_key_matching",
+        "fuzzy_threshold",
+        "minimum_margin",
+        "protected_value_field_names"
+      ],
+      "additionalProperties": false
+    },
+    "permission_rule": {
+      "type": "object",
+      "properties": {
+        "read_roles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/role" },
+          "uniqueItems": true
+        },
+        "propose_roles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/role" },
+          "uniqueItems": true
+        },
+        "write_roles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/role" },
+          "uniqueItems": true
+        }
+      },
+      "required": ["read_roles", "propose_roles", "write_roles"],
+      "additionalProperties": false
+    },
+    "permissions": {
+      "type": "object",
+      "properties": {
+        "default": { "$ref": "#/$defs/permission_rule" },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": { "$ref": "#/$defs/path" },
+              "read_roles": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/role" },
+                "uniqueItems": true
+              },
+              "propose_roles": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/role" },
+                "uniqueItems": true
+              },
+              "write_roles": {
+                "type": "array",
+                "items": { "$ref": "#/$defs/role" },
+                "uniqueItems": true
+              }
+            },
+            "required": ["path", "read_roles", "propose_roles", "write_roles"],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": ["default", "fields"],
+      "additionalProperties": false
+    },
+    "key_alias": {
+      "type": "object",
+      "properties": {
+        "object_path": {
+          "type": "string",
+          "pattern": "^$|^/.*"
+        },
+        "alias": { "type": "string", "minLength": 1 },
+        "canonical": { "type": "string", "minLength": 1 }
+      },
+      "required": ["object_path", "alias", "canonical"],
+      "additionalProperties": false
+    },
+    "value_alias": {
+      "type": "object",
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "alias": {},
+        "canonical": {}
+      },
+      "required": ["path", "alias", "canonical"],
+      "additionalProperties": false
+    },
+    "reference_rule": {
+      "type": "object",
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "target_types": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/name" },
+          "minItems": 1,
+          "uniqueItems": true
+        },
+        "cardinality": { "enum": ["one", "zero_or_one", "many"] },
+        "authority_direction": {
+          "enum": ["host_to_target", "target_to_host", "external_authority"]
+        }
+      },
+      "required": ["path", "target_types", "cardinality", "authority_direction"],
+      "additionalProperties": false
+    },
+    "migration": {
+      "type": "object",
+      "properties": {
+        "source_version": { "$ref": "#/$defs/semver" },
+        "target_version": { "$ref": "#/$defs/semver" },
+        "handler": { "type": "string", "minLength": 1 }
+      },
+      "required": ["source_version", "target_version", "handler"],
+      "additionalProperties": false
+    },
+    "component": {
+      "type": "object",
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "namespace": { "$ref": "#/$defs/name" },
+        "category": { "enum": ["data", "reference", "index"] },
+        "current_version": { "$ref": "#/$defs/semver" },
+        "versions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "properties": {
+              "version": { "$ref": "#/$defs/semver" },
+              "schema_id": {
+                "type": "string",
+                "pattern": "^urn:world-simulator:schema:"
+              }
+            },
+            "required": ["version", "schema_id"],
+            "additionalProperties": false
+          }
+        },
+        "allowed_entity_types": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/name" },
+          "uniqueItems": true
+        },
+        "authority": { "enum": ["authoritative", "derived"] },
+        "rebuildable": { "type": "boolean" },
+        "rebuild_from": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "allow_disable": { "type": "boolean" },
+        "unknown_field_policy": { "const": "reject" },
+        "permissions": { "$ref": "#/$defs/permissions" },
+        "ai": {
+          "type": "object",
+          "properties": {
+            "title_zh": { "type": "string", "minLength": 1 },
+            "description_zh": { "type": "string", "minLength": 1 },
+            "usage_notes": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            }
+          },
+          "required": ["title_zh", "description_zh", "usage_notes"],
+          "additionalProperties": false
+        },
+        "correction": {
+          "type": "object",
+          "properties": {
+            "key_aliases": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/key_alias" }
+            },
+            "value_aliases": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/value_alias" }
+            }
+          },
+          "required": ["key_aliases", "value_aliases"],
+          "additionalProperties": false
+        },
+        "references": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/reference_rule" }
+        },
+        "migrations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/migration" }
+        }
+      },
+      "required": [
+        "name",
+        "namespace",
+        "category",
+        "current_version",
+        "versions",
+        "allowed_entity_types",
+        "authority",
+        "rebuildable",
+        "rebuild_from",
+        "allow_disable",
+        "unknown_field_policy",
+        "permissions",
+        "ai",
+        "correction",
+        "references",
+        "migrations"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

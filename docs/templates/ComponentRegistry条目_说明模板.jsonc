@@ -1,0 +1,113 @@
+// 一、文件级总览
+// 文件功能：说明一个 Component 如何在 Registry 中登记运行语义。
+// 架构位置：Registry 位于 Schema 与 Validator 之间，不保存 Component 实例。
+// 输入：Component 名称、版本、宿主 Type、权限、权威性、引用和迁移信息。
+// 运作方式：Validator 先按名称和版本找 Schema，再读取本条目补充权限与业务边界。
+// 输出：供校验器、AI Schema View、迁移器和管理工具读取的运行规则。
+// 不负责：不复制 Schema 字段结构，不保存世界数据，不判断行动是否成立。
+// 阅读顺序：先理解整体职责，再看权限、纠错、引用和迁移区块，最后查看具体字段。
+
+{
+  // 二、结构级说明
+  // Component 的稳定名称；创建后不要用改名代替版本迁移。
+  "name": "example_component",
+
+  // 命名空间用于隔离核心、插件和 Mod。
+  "namespace": "core",
+
+  // 三、字段级说明
+  // data 表示自身权威数据；reference 表示语义连接；index 表示可重建索引。
+  "category": "data",
+
+  // 当前推荐写入版本，必须存在于 versions 中。
+  "current_version": "0.1.0",
+
+  // 每个受支持版本都必须指向一个真实存在的 JSON Schema。
+  "versions": [
+    {
+      // Component Schema 使用 Major.Minor.Patch 三段式版本号。
+      "version": "0.1.0",
+
+      // 必须与正式 Schema 文件中的 $id 完全一致。
+      "schema_id": "urn:world-simulator:schema:component:core:example_component:0.1.0"
+    }
+  ],
+
+  // 只有这些 Entity Type 可以挂载该 Component。
+  "allowed_entity_types": [
+    "character"
+  ],
+
+  // authoritative 是权威数据；derived 表示从其他权威数据派生。
+  "authority": "authoritative",
+
+  // Index 必须可重建；权威事实通常不可依赖其他数据重建。
+  "rebuildable": false,
+
+  // 可重建 Component 在这里声明权威来源。
+  "rebuild_from": [],
+
+  // 只有允许停用的非必需 Component 才能设为 true。
+  "allow_disable": false,
+
+  // AI 生成未登记字段时默认拒绝，避免含义漂移。
+  "unknown_field_policy": "reject",
+
+  // 权限区分读取、提出候选和正式写入。
+  "permissions": {
+    // 未被字段规则覆盖时使用默认权限。
+    "default": {
+      "read_roles": [
+        "ai",
+        "user",
+        "system"
+      ],
+      "propose_roles": [
+        "ai",
+        "user"
+      ],
+      "write_roles": [
+        "system"
+      ]
+    },
+
+    // 特定字段可以覆盖默认权限；path 使用 JSON Pointer。
+    "fields": [
+      {
+        "path": "/schema_version",
+        "read_roles": [
+          "ai",
+          "user",
+          "system"
+        ],
+        "propose_roles": [],
+        "write_roles": [
+          "system",
+          "migration"
+        ]
+      }
+    ]
+  },
+
+  // 提供给 AI Schema View 和人工管理界面的简明中文说明。
+  "ai": {
+    "title_zh": "示例组件",
+    "description_zh": "说明该 Component 保存什么以及不保存什么。",
+    "usage_notes": [
+      "说明 AI 在什么任务中读取它。",
+      "说明哪些字段只能提出候选，不能直接写入。"
+    ]
+  },
+
+  // 只登记确定性的兼容别名，不为 ID、Type 或自由文本登记模糊值替换。
+  "correction": {
+    "key_aliases": [],
+    "value_aliases": []
+  },
+
+  // Reference Component 在这里声明引用路径、目标 Type、基数和权威方向。
+  "references": [],
+
+  // 旧版本数据通过确定性的前向迁移进入新版本。
+  "migrations": []
+}

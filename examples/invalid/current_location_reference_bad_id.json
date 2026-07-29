@@ -1,0 +1,9 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "location_ref": {
+      "id": "Location Hua Shan",
+      "type": "locations"
+    }
+  }
+}

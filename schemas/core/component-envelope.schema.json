@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:core:component-envelope:0.1.0",
+  "title": "Component Instance Envelope",
+  "description": "所有正式 Component 实例共享的最小外壳。",
+  "type": "object",
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Component 数据结构版本，不是 Entity revision。"
+    },
+    "enabled": {
+      "type": "boolean",
+      "description": "仅 Registry 允许停用的非必需 Component 可以出现。"
+    },
+    "data": {
+      "type": "object",
+      "description": "Component 的业务数据。"
+    }
+  },
+  "required": ["schema_version", "data"]
+}

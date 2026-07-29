@@ -1,0 +1,231 @@
+{
+  "registry_version": "0.1.0",
+  "schema_dialect": "https://json-schema.org/draft/2020-12/schema",
+  "correction_policy": {
+    "normalize_unicode": true,
+    "normalize_key_style": true,
+    "fuzzy_key_matching": true,
+    "fuzzy_threshold": 0.88,
+    "minimum_margin": 0.08,
+    "protected_value_field_names": [
+      "id",
+      "type",
+      "schema_version",
+      "revision",
+      "description"
+    ]
+  },
+  "components": [
+    {
+      "name": "identity",
+      "namespace": "core",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:core:identity:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character",
+        "location",
+        "item",
+        "organization",
+        "skill",
+        "concept"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "system", "admin"],
+          "write_roles": ["system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/schema_version",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "身份组件",
+        "description_zh": "保存 Entity 的主要名称和别名。",
+        "usage_notes": [
+          "改名只修改身份数据，不修改 Entity ID。",
+          "AI 只能提出候选名称，正式写入由受控流程完成。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "",
+            "alias": "schemaVersion",
+            "canonical": "schema_version"
+          },
+          {
+            "object_path": "",
+            "alias": "datas",
+            "canonical": "data"
+          },
+          {
+            "object_path": "/data",
+            "alias": "primaryName",
+            "canonical": "primary_name"
+          },
+          {
+            "object_path": "/data",
+            "alias": "alises",
+            "canonical": "aliases"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [],
+      "migrations": []
+    },
+    {
+      "name": "current_location_reference",
+      "namespace": "core",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:core:current_location_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": ["character", "item"],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/location_ref/id",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": ["ai", "user", "resolver"],
+            "write_roles": ["projector", "system", "admin", "migration"]
+          },
+          {
+            "path": "/data/location_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "当前位置引用组件",
+        "description_zh": "保存 Character 或 Item 当前所在 Location 的权威引用。",
+        "usage_notes": [
+          "引用只持久化 id 和 type。",
+          "位置变化必须经过 Action、Resolver、Event 与 State Projector。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "location",
+            "canonical": "location_ref"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/location_ref",
+          "target_types": ["location"],
+          "cardinality": "one",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "history_index",
+      "namespace": "core",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:core:history_index:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character",
+        "location",
+        "item",
+        "organization",
+        "skill",
+        "concept",
+        "character_relation"
+      ],
+      "authority": "derived",
+      "rebuildable": true,
+      "rebuild_from": [
+        "event.event_participant_reference",
+        "event.event_location_reference",
+        "event.state_change"
+      ],
+      "allow_disable": true,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": [],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "历史索引组件",
+        "description_zh": "提供相关 Event 的可重建检索入口，不是历史权威来源。",
+        "usage_notes": [
+          "AI 可以读取索引候选，但最终判断必须加载权威 Event。",
+          "同一 Event 的 recent、important 等维度放在 index_roles 中。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "events",
+            "canonical": "event_refs"
+          },
+          {
+            "object_path": "/data/event_refs/*",
+            "alias": "roles",
+            "canonical": "index_roles"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/event_refs/*/event_ref",
+          "target_types": ["event"],
+          "cardinality": "many",
+          "authority_direction": "target_to_host"
+        }
+      ],
+      "migrations": []
+    }
+  ]
+}

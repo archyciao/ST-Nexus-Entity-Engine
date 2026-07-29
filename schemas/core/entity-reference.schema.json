@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:core:entity-reference:0.1.0",
+  "title": "EntityReference",
+  "description": "持久化 Entity 引用，只保存稳定 ID 和预期 Type。",
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+      "description": "目标 Entity 的稳定 ID；禁止模糊改写其值。"
+    },
+    "type": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$",
+      "description": "目标 Entity 的预期 Type；禁止模糊改写其值。"
+    }
+  },
+  "required": ["id", "type"],
+  "additionalProperties": false
+}

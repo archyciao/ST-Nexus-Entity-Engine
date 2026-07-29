@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "enabled": true,
+  "data": {
+    "event_refs": [
+      {
+        "event_ref": {
+          "id": "event_linghu_defeat_tian",
+          "type": "event"
+        },
+        "index_roles": ["recent", "important"]
+      }
+    ]
+  }
+}

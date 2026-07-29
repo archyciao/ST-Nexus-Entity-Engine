@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "world-simulator-schema"
+version = "0.1.0"
+description = "Component schema, correction, and validation foundation for World Simulator"
+requires-python = ">=3.11"
+dependencies = [
+  "jsonschema>=4.23,<5",
+  "PyYAML>=6,<7",
+]
+
+[project.scripts]
+world-schema = "world_simulator_schema.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

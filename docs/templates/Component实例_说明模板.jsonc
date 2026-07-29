@@ -1,0 +1,24 @@
+// 一、文件级总览
+// 文件功能：展示一个 Component 实例在存储和传输时的基本样子。
+// 架构位置：实例位于 Entity.components 下，由 JSON Schema 和 Registry 共同约束。
+// 输入：创建流程、迁移流程或通过初步解析的候选 Patch。
+// 运作方式：读取版本、校验 data、检查权限和引用，全部通过后才允许正式写入。
+// 输出：可安全挂载到 Entity 的 Component 数据。
+// 不负责：不保存宿主 Entity 的 id、type、description，也不复制被引用 Entity。
+// 阅读顺序：先看外壳，再看 data 中每个业务字段的说明。
+
+{
+  // 二、结构级说明
+  // 当前实例采用的 Component Schema 版本，不表示内容修改次数。
+  "schema_version": "0.1.0",
+
+  // 只有 Registry 允许停用时才保留，否则正式实例不能出现该字段。
+  "enabled": true,
+
+  // 三、字段级说明
+  // Component 的业务数据主体。
+  "data": {
+    // 示例值。正式字段应说明语义、单位、权威来源、更新者和空值含义。
+    "example_field": "示例值"
+  }
+}

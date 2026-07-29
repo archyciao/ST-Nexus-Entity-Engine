@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:core:identity:0.1.0",
+  "title": "IdentityComponent 0.1.0",
+  "description": "保存 Entity 的主要名称与别名。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "primary_name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "Entity 当前主要名称。"
+            },
+            "aliases": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100
+              },
+              "uniqueItems": true,
+              "description": "别名、旧名或常用称呼。"
+            }
+          },
+          "required": ["primary_name"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}
