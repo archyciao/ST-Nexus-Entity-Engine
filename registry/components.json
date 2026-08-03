@@ -42,16 +42,44 @@
       "unknown_field_policy": "reject",
       "permissions": {
         "default": {
-          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
-          "propose_roles": ["ai", "user", "system", "admin"],
-          "write_roles": ["system", "admin", "migration"]
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "system",
+            "admin",
+            "migration"
+          ]
         },
         "fields": [
           {
             "path": "/schema_version",
-            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
             "propose_roles": [],
-            "write_roles": ["system", "migration"]
+            "write_roles": [
+              "system",
+              "migration"
+            ]
           }
         ]
       },
@@ -102,7 +130,10 @@
           "schema_id": "urn:world-simulator:schema:component:core:current_location_reference:0.1.0"
         }
       ],
-      "allowed_entity_types": ["character", "item"],
+      "allowed_entity_types": [
+        "character",
+        "item"
+      ],
       "authority": "authoritative",
       "rebuildable": false,
       "rebuild_from": [],
@@ -110,22 +141,69 @@
       "unknown_field_policy": "reject",
       "permissions": {
         "default": {
-          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
-          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
-          "write_roles": ["projector", "system", "admin", "migration"]
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "resolver",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
         },
         "fields": [
           {
             "path": "/data/location_ref/id",
-            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
-            "propose_roles": ["ai", "user", "resolver"],
-            "write_roles": ["projector", "system", "admin", "migration"]
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
+            "propose_roles": [
+              "ai",
+              "user",
+              "resolver"
+            ],
+            "write_roles": [
+              "projector",
+              "system",
+              "admin",
+              "migration"
+            ]
           },
           {
             "path": "/data/location_ref/type",
-            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
             "propose_roles": [],
-            "write_roles": ["system", "migration"]
+            "write_roles": [
+              "system",
+              "migration"
+            ]
           }
         ]
       },
@@ -150,7 +228,9 @@
       "references": [
         {
           "path": "/data/location_ref",
-          "target_types": ["location"],
+          "target_types": [
+            "location"
+          ],
           "cardinality": "one",
           "authority_direction": "host_to_target"
         }
@@ -188,9 +268,22 @@
       "unknown_field_policy": "reject",
       "permissions": {
         "default": {
-          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
           "propose_roles": [],
-          "write_roles": ["projector", "system", "admin", "migration"]
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
         },
         "fields": []
       },
@@ -199,7 +292,7 @@
         "description_zh": "提供相关 Event 的可重建检索入口，不是历史权威来源。",
         "usage_notes": [
           "AI 可以读取索引候选，但最终判断必须加载权威 Event。",
-          "同一 Event 的 recent、important 等维度放在 index_roles 中。"
+          "同一 Event 的 recent、important、aspect_started 等维度放在 index_roles 中，不拆成多组平行数组。"
         ]
       },
       "correction": {
@@ -220,11 +313,1555 @@
       "references": [
         {
           "path": "/data/event_refs/*/event_ref",
-          "target_types": ["event"],
+          "target_types": [
+            "event"
+          ],
           "cardinality": "many",
           "authority_direction": "target_to_host"
         }
       ],
+      "migrations": []
+    },
+    {
+      "name": "character_profile",
+      "namespace": "character",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:character_profile:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色资料组件",
+        "description_zh": "保存角色相对稳定的物种、背景、年龄阶段和外貌资料。",
+        "usage_notes": [
+          "不得在本组件保存当前位置、组织关系、伤势或情绪。",
+          "玩家和 NPC 使用完全相同的结构。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "profile_background",
+            "canonical": "background"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [],
+      "migrations": []
+    },
+    {
+      "name": "character_behavior_profile",
+      "namespace": "character",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:character_behavior_profile:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": [
+          {
+            "path": "/data/motivations/*/motivation_id",
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
+            "propose_roles": [],
+            "write_roles": [
+              "system",
+              "admin",
+              "migration"
+            ]
+          },
+          {
+            "path": "/data/preferences/*/preference_id",
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
+            "propose_roles": [],
+            "write_roles": [
+              "system",
+              "admin",
+              "migration"
+            ]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "角色行为画像组件",
+        "description_zh": "统一保存 Personality、若干 Motivation 和 Preference，作为长期行为与描写锚点。",
+        "usage_notes": [
+          "Motivation 和 Preference 分别使用系统生成的 motivation_id 和 preference_id。",
+          "Intent、Action、Event 正文和 Process 推进状态不属于本组件。",
+          "未来数值系统使用新增字段或独立量化组件，不替换语义描述。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "motivation",
+            "canonical": "motivations"
+          },
+          {
+            "object_path": "/data",
+            "alias": "preference",
+            "canonical": "preferences"
+          },
+          {
+            "object_path": "/data/personality",
+            "alias": "tendencies",
+            "canonical": "behavioral_tendencies"
+          },
+          {
+            "object_path": "/data/motivations/*",
+            "alias": "entry_id",
+            "canonical": "motivation_id"
+          },
+          {
+            "object_path": "/data/preferences/*",
+            "alias": "entry_id",
+            "canonical": "preference_id"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/preferences/*/related_entity_ref",
+          "target_types": [
+            "character",
+            "location",
+            "item",
+            "organization",
+            "skill",
+            "concept",
+            "character_relation",
+            "event",
+            "timeline",
+            "memory"
+          ],
+          "cardinality": "zero_or_one",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "item_identity_rules": [
+        {
+          "array_path": "/data/motivations",
+          "id_field": "motivation_id"
+        },
+        {
+          "array_path": "/data/preferences",
+          "id_field": "preference_id"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "character_state",
+      "namespace": "character",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:character_state:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "resolver",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色当前状态组件",
+        "description_zh": "保存能够跨场景持续并影响行动的身体、心理和情绪语义状态。",
+        "usage_notes": [
+          "瞬时动作和临时 Intent 不进入本组件。",
+          "状态变化必须由 Event 支撑并通过 State Patch 写入。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "emotions",
+            "canonical": "current_emotions"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [],
+      "migrations": []
+    },
+    {
+      "name": "character_objective",
+      "namespace": "character",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:character_objective:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "resolver",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": [
+          {
+            "path": "/data/objectives/*/objective_id",
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
+            "propose_roles": [],
+            "write_roles": [
+              "system",
+              "admin",
+              "migration"
+            ]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "角色中短期目标组件",
+        "description_zh": "保存若干并列的中短期目标，不包含计划步骤、过程和进度。",
+        "usage_notes": [
+          "每项目标使用系统生成的 objective_id，便于未来由一个或多个独立 Process Entity 稳定引用。",
+          "Objective 的形成、完成、放弃或替换必须由 Event 和 State Patch 支撑。",
+          "临时 Intent 和 Action 不写入本组件。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "plans",
+            "canonical": "objectives"
+          },
+          {
+            "object_path": "/data/objectives/*",
+            "alias": "plan_id",
+            "canonical": "objective_id"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/objectives/*/related_entity_refs/*",
+          "target_types": [
+            "character",
+            "location",
+            "item",
+            "organization",
+            "skill",
+            "concept",
+            "character_relation",
+            "event",
+            "timeline",
+            "memory"
+          ],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "item_identity_rules": [
+        {
+          "array_path": "/data/objectives",
+          "id_field": "objective_id"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "inventory_reference",
+      "namespace": "character",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:inventory_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "resolver",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色物品栏引用组件",
+        "description_zh": "保存角色当前携带、装备或穿戴的 Item 引用。",
+        "usage_notes": [
+          "inventory_roles 与对应 item_ref 放在同一项中。",
+          "本组件不表示 Item 的法律所有权。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "items",
+            "canonical": "item_refs"
+          },
+          {
+            "object_path": "/data/item_refs/*",
+            "alias": "roles",
+            "canonical": "inventory_roles"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/item_refs/*/item_ref",
+          "target_types": [
+            "item"
+          ],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "skill_reference",
+      "namespace": "character",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:skill_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "resolver",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色技能引用组件",
+        "description_zh": "保存角色掌握的 Skill 引用及当前语义熟练度。",
+        "usage_notes": [
+          "Skill 定义保存在目标 Skill Entity。",
+          "未来数值熟练度不得替换 proficiency_description。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "skills",
+            "canonical": "skill_refs"
+          },
+          {
+            "object_path": "/data/skill_refs/*",
+            "alias": "mastery_description",
+            "canonical": "proficiency_description"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/skill_refs/*/skill_ref",
+          "target_types": [
+            "skill"
+          ],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "memory_reference",
+      "namespace": "character",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:memory_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [
+            "ai",
+            "user",
+            "resolver",
+            "system",
+            "admin"
+          ],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色记忆引用组件",
+        "description_zh": "保存少量固定或当前活跃的 Memory 引用，不是全部 Memory 目录。",
+        "usage_notes": [
+          "Memory 正文和 Owner 仍以目标 Memory Entity 为准。",
+          "全部已拥有 Memory 由 memory_index 提供可重建入口。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "memories",
+            "canonical": "memory_refs"
+          },
+          {
+            "object_path": "/data/memory_refs/*",
+            "alias": "roles",
+            "canonical": "reference_roles"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/memory_refs/*/memory_ref",
+          "target_types": [
+            "memory"
+          ],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "relation_index",
+      "namespace": "character",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:relation_index:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "derived",
+      "rebuildable": true,
+      "rebuild_from": [
+        "character_relation.relation_endpoint_reference"
+      ],
+      "allow_disable": true,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色关系索引组件",
+        "description_zh": "提供相关 Character Relation 的可重建检索入口。",
+        "usage_notes": [
+          "关系类型、方向和状态只保存在 Relation Entity。",
+          "删除本索引不得删除任何关系事实。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "relations",
+            "canonical": "relation_refs"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/relation_refs/*",
+          "target_types": [
+            "character_relation"
+          ],
+          "cardinality": "many",
+          "authority_direction": "target_to_host"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "memory_index",
+      "namespace": "character",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:character:memory_index:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character"
+      ],
+      "authority": "derived",
+      "rebuildable": true,
+      "rebuild_from": [
+        "memory.memory_owner_reference"
+      ],
+      "allow_disable": true,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [],
+          "write_roles": [
+            "projector",
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "角色记忆索引组件",
+        "description_zh": "提供当前 Character 所有 Memory 的可重建检索入口。",
+        "usage_notes": [
+          "Memory Owner 与正文以目标 Memory Entity 为准。",
+          "按来源、时间或语义筛选由数据库索引负责，不拆成平行数组。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "memories",
+            "canonical": "memory_refs"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/memory_refs/*",
+          "target_types": [
+            "memory"
+          ],
+          "cardinality": "many",
+          "authority_direction": "target_to_host"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "relation_endpoint_reference",
+      "namespace": "relation",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:relation:relation_endpoint_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character_relation"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/participant_refs/*/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "关系端点引用组件",
+        "description_zh": "保存一个 Character Relation 唯一连接的两个 Character。",
+        "usage_notes": [
+          "端点只标识无序人物对，不保存师徒、敌对等角色语义。",
+          "两个引用按 Character ID 升序持久化，用于保证同一人物对只有一个 Relation。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/participant_refs/*",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "character_relation_aspects",
+      "namespace": "relation",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:relation:character_relation_aspects:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character_relation"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/aspects/*/aspect_id",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/aspects/*/participant_roles/*/character_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/aspects/*/perspective/owner_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "人物关系面向组件",
+        "description_zh": "集中保存同一人物对之间全部已定义的关系面向。",
+        "usage_notes": [
+          "师徒、亲属、合作、敌意等关系放在同一 Relation 的 aspects 中，不拆成多个 Relation Entity。",
+          "关系面向使用自然语言说明；数值系统未来只能补充，不能替代语义。",
+          "共同事实型面向不强制绑定 Memory；单方认知型面向必须由 RelationMemoryIndex 中至少一个 formation_basis Memory 锚定。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/aspects/*/participant_roles/*/character_ref",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        },
+        {
+          "path": "/data/aspects/*/perspective/owner_ref",
+          "target_types": ["character"],
+          "cardinality": "zero_or_one",
+          "authority_direction": "host_to_target"
+        },
+        {
+          "path": "/data/aspects/*/disclosure/concealed_from_refs/*",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "item_identity_rules": [
+        {
+          "array_path": "/data/aspects",
+          "id_field": "aspect_id"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "character_relation_state",
+      "namespace": "relation",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:relation:character_relation_state:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character_relation"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/directional_states/*/from_character_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/directional_states/*/toward_character_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "人物关系当前状态组件",
+        "description_zh": "保存关系双方当前分别如何对待对方的自然语义状态。",
+        "usage_notes": [
+          "方向状态可以只存在一个方向；缺少记录不等于中立。",
+          "v0.1.0 不设置好感、信任、亲密等数值字段，避免提前封死后续数值模型。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/directional_states/*/from_character_ref",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        },
+        {
+          "path": "/data/directional_states/*/toward_character_ref",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "relation_memory_index",
+      "namespace": "relation",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:relation:relation_memory_index:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character_relation"
+      ],
+      "authority": "derived",
+      "rebuildable": true,
+      "rebuild_from": [
+        "memory.relation_context_reference"
+      ],
+      "allow_disable": true,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": [],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "关系记忆索引组件",
+        "description_zh": "提供解释 Relation 及其 Aspect 的重要 Memory 检索入口。",
+        "usage_notes": [
+          "索引可从 Memory 的 RelationContextReference 重建，不是关系依据的第二份权威数据。",
+          "读取时先展开 Memory 引用预览，再按 Owner 和 Description 判断是否加载完整 Memory。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/memory_refs/*/memory_ref",
+          "target_types": ["memory"],
+          "cardinality": "many",
+          "authority_direction": "target_to_host"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "relation_context_reference",
+      "namespace": "memory",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:memory:relation_context_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "memory"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/relation_links/*/relation_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "记忆关系上下文引用组件",
+        "description_zh": "保存 Memory 对相关 Relation 及具体 Aspect 的权威直接引用。",
+        "usage_notes": [
+          "同一 Relation 的相关 Aspect 与语义角色集中在一个 relation_link 中。",
+          "RelationMemoryIndex 只是本组件的可重建反向索引。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/relation_links/*/relation_ref",
+          "target_types": ["character_relation"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "event_time",
+      "namespace": "event",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:event:event_time:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "event"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "Event 时间组件",
+        "description_zh": "保存叙事已经给出的起止时间表达和原有精度。",
+        "usage_notes": [
+          "时间不明确时保留傍晚、三日后等原表达，不补写具体日期。",
+          "生成中 Event 尚无结束时间时可以省略 end_time；完全没有时间依据时不挂载本组件。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [],
+      "migrations": []
+    },
+    {
+      "name": "event_location_reference",
+      "namespace": "event",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:event:event_location_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "event"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/location_refs/*/location_ref/id",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/location_refs/*/location_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/location_refs/*/sequence",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["projector", "system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Event 地点引用组件",
+        "description_zh": "保存 Event 实际发生或实际经过的 Location 权威引用。",
+        "usage_notes": [
+          "AI 只提出实际地点候选和语义角色，Resolver 匹配 Location，固定脚本写入稳定 ID 与顺序。",
+          "仅被提到、受邀或计划前往的地点不得进入本组件。",
+          "移动 Event 返回原地点时允许同一 Location 以新的经过顺序再次出现。",
+          "Location 的 HistoryIndex 是本组件的可重建反向目录。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/location_refs/*/location_ref",
+          "target_types": ["location"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "event_participant_reference",
+      "namespace": "event",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:event:event_participant_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "event"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/participant_refs/*/participant_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Event 参与者引用组件",
+        "description_zh": "保存实际参与、观察或接收当前 Event 的 Character 权威引用。",
+        "usage_notes": [
+          "同一 Character 的全部参与角色集中在一项中。",
+          "Character 的 HistoryIndex 是本组件的可重建反向目录。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/participant_refs/*/participant_ref",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "event_memory_index",
+      "namespace": "event",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:event:event_memory_index:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "event"
+      ],
+      "authority": "derived",
+      "rebuildable": true,
+      "rebuild_from": [
+        "memory.source_event_reference"
+      ],
+      "allow_disable": true,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": [],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "Event 记忆索引组件",
+        "description_zh": "提供由当前 Event 促成的 Memory 可重建检索入口。",
+        "usage_notes": [
+          "Memory Owner 与正文必须从目标 Memory 读取。",
+          "索引可由 Memory 的 SourceEventReference 完整重建。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/memory_refs/*",
+          "target_types": ["memory"],
+          "cardinality": "many",
+          "authority_direction": "target_to_host"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "memory_owner_reference",
+      "namespace": "memory",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:memory:memory_owner_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "memory"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/owner_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Memory 所有者引用组件",
+        "description_zh": "保存拥有当前主观认知的唯一 Character。",
+        "usage_notes": [
+          "Owner 是 Memory 的权威属性，不能从 Character 的反向目录推断后回写。",
+          "Character MemoryIndex 可从本组件重建。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/owner_ref",
+          "target_types": ["character"],
+          "cardinality": "one",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "source_event_reference",
+      "namespace": "memory",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:memory:source_event_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "memory"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/event_refs/*/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Memory 来源 Event 引用组件",
+        "description_zh": "保存促成当前主观认知的至少一个客观 Event 锚点。",
+        "usage_notes": [
+          "Memory 内容可以错误或不完整，但形成认知的客观 Event 不能缺失。",
+          "EventMemoryIndex 可从本组件重建。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/event_refs/*",
+          "target_types": ["event"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
+      "name": "entity_management",
+      "namespace": "core",
+      "category": "data",
+      "current_version": "0.2.0",
+      "versions": [
+        {
+          "version": "0.2.0",
+          "schema_id": "urn:world-simulator:schema:component:core:entity_management:0.2.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character",
+        "location",
+        "item",
+        "organization",
+        "skill",
+        "concept",
+        "character_relation",
+        "event",
+        "timeline",
+        "memory"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": [
+            "ai",
+            "user",
+            "system",
+            "resolver",
+            "projector",
+            "admin",
+            "migration"
+          ],
+          "propose_roles": [],
+          "write_roles": [
+            "system",
+            "admin",
+            "migration"
+          ]
+        },
+        "fields": [
+          {
+            "path": "/data/lifecycle_status",
+            "read_roles": [
+              "ai",
+              "user",
+              "system",
+              "resolver",
+              "projector",
+              "admin",
+              "migration"
+            ],
+            "propose_roles": [
+              "resolver",
+              "system",
+              "admin"
+            ],
+            "write_roles": [
+              "projector",
+              "system",
+              "admin",
+              "migration"
+            ]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Entity 管理组件",
+        "description_zh": "保存系统审计信息和世界生命周期状态；相关创建、变化与终止过程通过 HistoryIndex 检索 Event。",
+        "usage_notes": [
+          "AI 不得修改系统时间、数据来源或 revision。",
+          "生命周期变化必须经过 Event 和受控投影流程。",
+          "不保存单一 created_by_event_ref 或 ended_by_event_ref；一个 Entity 的形成和结束可能由多个 Event 累积造成。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [
+          {
+            "object_path": "/data",
+            "alias": "createdAt",
+            "canonical": "created_at"
+          },
+          {
+            "object_path": "/data",
+            "alias": "updatedAt",
+            "canonical": "updated_at"
+          },
+          {
+            "object_path": "/data",
+            "alias": "lifecycleStatus",
+            "canonical": "lifecycle_status"
+          }
+        ],
+        "value_aliases": []
+      },
+      "references": [],
       "migrations": []
     }
   ]

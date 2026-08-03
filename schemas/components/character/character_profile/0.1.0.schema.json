@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:character_profile:0.1.0",
+  "title": "CharacterProfileComponent 0.1.0",
+  "description": "保存 Character 相对稳定的客观资料，不保存当前状态、组织关系或主观认知。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "species": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "角色所属物种或存在形态，例如人类、狐妖或具有认知能力的动物。"
+            },
+            "gender": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "角色的性别或社会性别描述；不使用封闭枚举限制未来世界设定。"
+            },
+            "age_description": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "便于 AI 理解的年龄或生命阶段描述，不作为精确世界时间计算结果。"
+            },
+            "background": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "角色相对稳定的出身和经历背景；当前组织成员关系仍以 Relation 为准。"
+            },
+            "appearance": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 2000,
+              "description": "角色通常外貌和辨识特征，不保存由伤势、服装或场景造成的短期表现。"
+            }
+          },
+          "required": ["species", "background"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "relation_links": [
+      {
+        "relation_ref": {
+          "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+          "type": "character_relation"
+        },
+        "related_aspect_ids": [
+          "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0202"
+        ],
+        "context_roles": ["formation_basis", "current_basis"]
+      }
+    ]
+  }
+}

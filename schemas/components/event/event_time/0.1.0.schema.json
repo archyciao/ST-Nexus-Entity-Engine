@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:event:event_time:0.1.0",
+  "title": "EventTimeComponent 0.1.0",
+  "description": "保存叙事已经给出的 Event 起止时间表达及其原有精度。",
+  "$defs": {
+    "time_point": {
+      "type": "object",
+      "properties": {
+        "expression": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "description": "保留叙事中的时间表达，例如傍晚、三日后或某年三月初七。"
+        },
+        "precision": {
+          "enum": ["exact", "approximate"],
+          "description": "说明原叙事是否给出了可精确采用的时间；不得为提高精度而补写事实。"
+        }
+      },
+      "required": ["expression", "precision"],
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "start_time": {
+              "$ref": "#/$defs/time_point"
+            },
+            "end_time": {
+              "$ref": "#/$defs/time_point",
+              "description": "形成中的 Event 尚未出现结束时间时可以省略。"
+            }
+          },
+          "required": ["start_time"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

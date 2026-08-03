@@ -36,7 +36,14 @@
                   "index_roles": {
                     "type": "array",
                     "items": {
-                      "enum": ["recent", "important"]
+                      "enum": [
+                        "recent",
+                        "important",
+                        "aspect_started",
+                        "state_changed",
+                        "aspect_ended",
+                        "turning_point"
+                      ]
                     },
                     "minItems": 1,
                     "uniqueItems": true

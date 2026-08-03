@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "objectives": [
+      {
+        "objective_id": "objective_01K2ABCDEFGHJKMNPQRSTV0105",
+        "description": "查清岳不群为何怀疑自己的剑法来历。",
+        "horizon": "medium_term",
+        "steps": ["试探师父", "查阅旧事", "询问师娘"]
+      }
+    ]
+  }
+}

@@ -8,6 +8,13 @@
 - ComponentSchema_说明模板.jsonc：用带 // 注释的 JSONC 展示正式 JSON Schema 的结构与字段。
 - ComponentRegistry条目_说明模板.jsonc：说明 Registry 各区块、字段、权威性和权限边界。
 - Component实例_说明模板.jsonc：说明正式 Component 实例的外壳和业务字段。
+- Character实体_说明模板.jsonc：按整体、结构、字段三级说明完整 Character 的数据边界和读取顺序。
+- CharacterRelation实体_说明模板.jsonc：说明同一人物对的 Endpoint、多个 Aspect、方向状态和 Memory 索引如何配合。
+- EntityID模块_说明模板.py：说明 `type_series` ID 的系统生成方式、校验边界和上层调用顺序。
+- Entity校验模块_说明模板.py：说明单个 Component 校验之后如何执行完整 Entity 的跨组件一致性检查。
+- Entity网络模块_说明模板.py：说明多个 Entity 的目标校验、反向索引重建和权威方向。
+- Entity网络样例_说明模板.jsonc：说明 Character、Location、Event、Memory 与 Relation 封闭测试样例的引用结构。
+- AIRP三路提取测试工具_说明模板.py：说明 Event、Memory、其他 Entity 同批并发、固定汇合、失败恢复和单文件证据归档。
 
 ## 说明层级
 

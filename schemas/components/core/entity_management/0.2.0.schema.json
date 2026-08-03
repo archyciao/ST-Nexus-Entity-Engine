@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:core:entity_management:0.2.0",
+  "title": "EntityManagementComponent 0.2.0",
+  "description": "保存 Entity 的系统审计字段和世界生命周期字段。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.2.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "created_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Entity 的系统创建时间。"
+            },
+            "updated_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "Entity 最近一次正式写入时间。"
+            },
+            "data_source": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "数据来源，例如 user_created、imported 或 system_generated。"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Entity 内容修订号，用于并发控制，不是 schema_version。"
+            },
+            "lifecycle_status": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "当前世界生命周期状态；具体允许值和转换由 Entity Type Registry 限定。"
+            }
+          },
+          "required": ["created_at", "updated_at", "data_source", "revision", "lifecycle_status"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

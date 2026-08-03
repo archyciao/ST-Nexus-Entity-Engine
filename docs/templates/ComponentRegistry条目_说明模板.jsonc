@@ -108,6 +108,10 @@
   // Reference Component 在这里声明引用路径、目标 Type、基数和权威方向。
   "references": [],
 
+  // 数组条目需要用局部稳定 ID 单独更新时，在这里要求该 ID 不可重复。
+  // array_path 指向数组，id_field 指向数组每一项中的标识字段。
+  "item_identity_rules": [],
+
   // 旧版本数据通过确定性的前向迁移进入新版本。
   "migrations": []
 }

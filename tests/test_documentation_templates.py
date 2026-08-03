@@ -43,9 +43,12 @@ class DocumentationTemplateTests(unittest.TestCase):
                     json.loads(path.read_text(encoding="utf-8"))
 
     def test_python_template_compiles_without_execution(self) -> None:
-        path = self.template_root / "Component模块_说明模板.py"
-        source = path.read_text(encoding="utf-8")
-        compile(source, str(path), "exec")
+        templates = sorted(self.template_root.glob("*_说明模板.py"))
+        self.assertGreaterEqual(len(templates), 2)
+        for path in templates:
+            with self.subTest(path=path.name):
+                source = path.read_text(encoding="utf-8")
+                compile(source, str(path), "exec")
 
     def test_templates_are_outside_runtime_scan_paths(self) -> None:
         store = SchemaStore(ROOT)
@@ -58,9 +61,30 @@ class DocumentationTemplateTests(unittest.TestCase):
         )
         self.assertEqual(
             {
+                "character_behavior_profile",
+                "character_objective",
+                "character_profile",
+                "character_state",
                 "current_location_reference",
+                "character_relation_aspects",
+                "character_relation_state",
+                "entity_management",
+                "event_location_reference",
+                "event_memory_index",
+                "event_participant_reference",
+                "event_time",
                 "history_index",
                 "identity",
+                "inventory_reference",
+                "memory_index",
+                "memory_owner_reference",
+                "memory_reference",
+                "relation_context_reference",
+                "relation_endpoint_reference",
+                "relation_index",
+                "relation_memory_index",
+                "skill_reference",
+                "source_event_reference",
             },
             set(store.components),
         )

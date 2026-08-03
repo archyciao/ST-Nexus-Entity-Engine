@@ -7,6 +7,7 @@ from typing import Any
 from jsonschema.exceptions import ValidationError
 
 from .correction import CorrectionEngine
+from .entity_ids import is_valid_entity_id
 from .schema_store import SchemaStore
 
 
@@ -186,7 +187,14 @@ class ComponentValidator:
                 key=lambda item: list(item.absolute_path),
             )
         ]
-        errors = [*correction_errors, *schema_errors]
+        identity_errors = _validate_item_identity_rules(component, corrected)
+        reference_errors = _validate_reference_id_rules(component, corrected)
+        errors = [
+            *correction_errors,
+            *schema_errors,
+            *identity_errors,
+            *reference_errors,
+        ]
         return ValidationReport(
             not errors,
             component_name,
@@ -255,6 +263,110 @@ def _path_pattern_matches(pattern: str, path: str) -> bool:
         expected == "*" or expected == actual
         for expected, actual in zip(pattern_parts, path_parts)
     )
+
+
+def _validate_item_identity_rules(
+    component: dict[str, Any],
+    instance: dict[str, Any],
+) -> list[dict[str, str]]:
+    """检查数组条目的局部稳定标识，避免后续更新指向多个对象。
+
+    Registry 只声明数组路径和标识字段；这里读取实际 Component 数据，
+    在同一数组内发现重复标识时返回明确错误。字段缺失或类型错误仍交由
+    JSON Schema 报告，避免同一问题产生多份含义不同的错误。
+    """
+
+    issues: list[dict[str, str]] = []
+    for rule in component.get("item_identity_rules", []):
+        array_path = rule["array_path"]
+        id_field = rule["id_field"]
+        items = _value_at_pointer(instance, array_path)
+        if not isinstance(items, list):
+            continue
+
+        seen: dict[str, int] = {}
+        for index, item in enumerate(items):
+            if not isinstance(item, dict):
+                continue
+            identity = item.get(id_field)
+            if not isinstance(identity, str):
+                continue
+            if identity in seen:
+                issues.append(
+                    ValidationIssue(
+                        "DUPLICATE_ITEM_ID",
+                        f"{array_path}/{index}/{id_field}",
+                        (
+                            f"{id_field} 与第 {seen[identity]} 项重复: "
+                            f"{identity}"
+                        ),
+                    ).to_dict()
+                )
+            else:
+                seen[identity] = index
+    return issues
+
+
+def _value_at_pointer(instance: Any, pointer: str) -> Any:
+    """按简单 JSON Pointer 读取值；找不到路径时返回 None。"""
+
+    current = instance
+    for raw_part in [part for part in pointer.split("/") if part]:
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def _validate_reference_id_rules(
+    component: dict[str, Any],
+    instance: dict[str, Any],
+) -> list[dict[str, str]]:
+    """检查每条已登记引用的 ID 前缀是否与其 Type 完全一致。
+
+    JSON Schema 负责确认 ID 和 Type 各自的格式；本步骤补充两者之间的
+    交叉约束，避免把 ``character_...`` 错当成 Item 或 Location 引用。
+    """
+
+    issues: list[dict[str, str]] = []
+    for declaration in component.get("references", []):
+        pattern = declaration["path"]
+        for path, reference in _values_at_pattern(instance, pattern):
+            if not isinstance(reference, dict):
+                continue
+            entity_id = reference.get("id")
+            entity_type = reference.get("type")
+            if not isinstance(entity_id, str) or not isinstance(entity_type, str):
+                continue
+            if not is_valid_entity_id(entity_id, entity_type):
+                issues.append(
+                    ValidationIssue(
+                        "INVALID_REFERENCE_ID",
+                        f"{path}/id",
+                        "引用 ID 必须符合 type_series，且前缀必须等于 type。",
+                    ).to_dict()
+                )
+    return issues
+
+
+def _values_at_pattern(instance: Any, pointer: str) -> list[tuple[str, Any]]:
+    """按含 ``*`` 的 JSON Pointer 取得所有实际路径和值。"""
+
+    states: list[tuple[str, Any]] = [("", instance)]
+    for raw_part in [part for part in pointer.split("/") if part]:
+        part = raw_part.replace("~1", "/").replace("~0", "~")
+        next_states: list[tuple[str, Any]] = []
+        for current_path, current in states:
+            if part == "*" and isinstance(current, list):
+                next_states.extend(
+                    (f"{current_path}/{index}", value)
+                    for index, value in enumerate(current)
+                )
+            elif isinstance(current, dict) and part in current:
+                next_states.append((f"{current_path}/{part}", current[part]))
+        states = next_states
+    return states
 
 
 def _json_pointer(path_parts: Any) -> str:

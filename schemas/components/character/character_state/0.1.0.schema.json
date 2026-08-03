@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:character_state:0.1.0",
+  "title": "CharacterStateComponent 0.1.0",
+  "description": "保存能够跨场景持续并影响当前行动的 Character 语义状态。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "physical_condition": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1500,
+              "description": "当前身体状况及其对行动的实际影响。"
+            },
+            "mental_condition": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 1500,
+              "description": "当前清醒程度、心理压力和认知状态，不代替 Memory。"
+            },
+            "current_emotions": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              "maxItems": 16,
+              "uniqueItems": true,
+              "description": "可以跨越当前一句话或动作持续存在的情绪状态。"
+            }
+          },
+          "required": ["physical_condition", "mental_condition", "current_emotions"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

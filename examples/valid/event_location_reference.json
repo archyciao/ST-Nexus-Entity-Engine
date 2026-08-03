@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "location_refs": [
+      {
+        "location_ref": {
+          "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
+          "type": "location"
+        },
+        "location_roles": [
+          "primary"
+        ],
+        "sequence": 0
+      }
+    ]
+  }
+}

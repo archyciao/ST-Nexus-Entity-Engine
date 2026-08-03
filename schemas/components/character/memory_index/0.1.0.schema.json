@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:memory_index:0.1.0",
+  "title": "MemoryIndexComponent 0.1.0",
+  "description": "保存可从 Memory Owner Reference 重建的 Character 全部 Memory 检索入口。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "memory_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": { "const": "memory" }
+                    }
+                  }
+                ]
+              },
+              "uniqueItems": true,
+              "description": "由当前 Character 拥有的 Memory 引用；Owner 等预览字段不持久化。"
+            }
+          },
+          "required": ["memory_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:inventory_reference:0.1.0",
+  "title": "InventoryReferenceComponent 0.1.0",
+  "description": "保存 Character 当前携带、穿戴或装备的 Item 引用，不表示法律所有权。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "item_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "item_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "item" }
+                        }
+                      }
+                    ]
+                  },
+                  "inventory_roles": {
+                    "type": "array",
+                    "items": {
+                      "enum": ["carried", "equipped", "worn"]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "description": "同一 Item 在当前 Character 物品栏中的携带、装备或穿戴角色。"
+                  }
+                },
+                "required": ["item_ref", "inventory_roles"],
+                "additionalProperties": false
+              },
+              "description": "同一 Item 的相关角色放在同一引用项中。"
+            }
+          },
+          "required": ["item_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

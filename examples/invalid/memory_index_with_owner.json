@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "memory_refs": [
+      {
+        "id": "memory_01K2ABCDEFGHJKMNPQRSTV000S",
+        "type": "memory",
+        "owner_ref": {
+          "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+          "type": "character"
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "personality": {
+      "summary": "洒脱重情。"
+    },
+    "motivations": [
+      {
+        "motivation_id": "motivation_01K2ABCDEFGHJKMNPQRSTV0101",
+        "description": 0.8
+      }
+    ],
+    "preferences": []
+  }
+}

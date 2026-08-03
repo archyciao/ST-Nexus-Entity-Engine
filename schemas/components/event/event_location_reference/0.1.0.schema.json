@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:event:event_location_reference:0.1.0",
+  "title": "EventLocationReferenceComponent 0.1.0",
+  "description": "保存 Event 实际发生或实际经过的 Location 权威引用。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "location_refs": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "location_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "location" }
+                        }
+                      }
+                    ]
+                  },
+                  "location_roles": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": ["primary", "start", "transit", "end"]
+                    },
+                    "description": "该次实际地点经过在 Event 中承担的作用。"
+                  },
+                  "sequence": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "由固定脚本写入的地点经过顺序；返回原处时允许同一 Location 再次出现。"
+                  }
+                },
+                "required": ["location_ref", "location_roles", "sequence"],
+                "additionalProperties": false
+              },
+              "description": "只包含实际发生或经过的地点；仅被提到或计划前往的地点不得进入。"
+            }
+          },
+          "required": ["location_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

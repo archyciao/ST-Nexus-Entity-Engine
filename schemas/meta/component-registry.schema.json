@@ -154,6 +154,19 @@
       "required": ["path", "target_types", "cardinality", "authority_direction"],
       "additionalProperties": false
     },
+    "item_identity_rule": {
+      "type": "object",
+      "description": "要求指定数组中的局部稳定标识在该数组内唯一。",
+      "properties": {
+        "array_path": { "$ref": "#/$defs/path" },
+        "id_field": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        }
+      },
+      "required": ["array_path", "id_field"],
+      "additionalProperties": false
+    },
     "migration": {
       "type": "object",
       "properties": {
@@ -234,6 +247,10 @@
         "references": {
           "type": "array",
           "items": { "$ref": "#/$defs/reference_rule" }
+        },
+        "item_identity_rules": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/item_identity_rule" }
         },
         "migrations": {
           "type": "array",

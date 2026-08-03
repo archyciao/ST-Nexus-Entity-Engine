@@ -1,0 +1,98 @@
+{
+  // 一、文件级总览
+  // 文件功能：说明封闭网络测试样例的组织方式；正式测试数据保存在 examples/networks。
+  // 这里的 Event 和 Memory 只展示已稳定的引用层，不代表其正文 Schema 已冻结。
+  "fixture_purpose": "本样例要验证的关系",
+  // 二、结构级说明
+  // entities 是同一次封闭校验中可互相解析的完整目标集合；缺少被引用目标会直接失败。
+  "entities": [
+    {
+      "id": "character_<系统生成序号>",
+      "type": "character",
+      "description": "用于检索和引用预览的角色摘要",
+      "components": {
+        // 三、字段级说明
+        // memory_reference 是少量固定入口；memory_index 则由 Memory Owner 反向重建。
+        "memory_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "memory_refs": [
+              {
+                "memory_ref": { "id": "memory_<系统生成序号>", "type": "memory" },
+                "reference_roles": ["pinned"]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "location_<系统生成序号>",
+      "type": "location",
+      "description": "Event 实际发生地点的引用预览",
+      "components": {
+        // Location 的 history_index 不在源数据里手工维护，由 Event 地点引用反向重建。
+      }
+    },
+    {
+      "id": "event_<系统生成序号>",
+      "type": "event",
+      "description": "已经发生的客观经历摘要",
+      "components": {
+        // 时间只保留叙事已有表达和精度。
+        "event_time": {
+          "schema_version": "0.1.0",
+          "data": {
+            "start_time": { "expression": "傍晚", "precision": "approximate" }
+          }
+        },
+        // Event 直接保存实际地点；Location HistoryIndex 是反向派生目录。
+        "event_location_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "location_refs": [
+              {
+                "location_ref": { "id": "location_<系统生成序号>", "type": "location" },
+                "location_roles": ["primary"],
+                "sequence": 0
+              }
+            ]
+          }
+        },
+        // Event 直接保存参与 Character；Character HistoryIndex 是反向派生目录。
+        "event_participant_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "participant_refs": [
+              {
+                "participant_ref": { "id": "character_<系统生成序号>", "type": "character" },
+                "participation_roles": ["actor"]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "memory_<系统生成序号>",
+      "type": "memory",
+      "description": "某个 Character 对来源 Event 的主观认知",
+      "components": {
+        // Owner 与来源 Event 都是 Memory 一侧的权威 Reference。
+        "memory_owner_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "owner_ref": { "id": "character_<系统生成序号>", "type": "character" }
+          }
+        },
+        "source_event_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "event_refs": [{ "id": "event_<系统生成序号>", "type": "event" }],
+            "acquisition_mode": "witnessed_event"
+          }
+        }
+      }
+    }
+  ]
+}

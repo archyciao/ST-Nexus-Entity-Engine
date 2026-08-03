@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:event:event_memory_index:0.1.0",
+  "title": "EventMemoryIndexComponent 0.1.0",
+  "description": "保存可从 Memory 来源 Event 引用重建的反向记忆目录。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "memory_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": { "const": "memory" }
+                    }
+                  }
+                ]
+              },
+              "uniqueItems": true,
+              "description": "由直接引用当前 Event 的 Memory 组成；Owner 与正文从目标 Memory 读取。"
+            }
+          },
+          "required": ["memory_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

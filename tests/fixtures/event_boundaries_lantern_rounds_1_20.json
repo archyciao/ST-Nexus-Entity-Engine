@@ -1,0 +1,82 @@
+{
+  "fixture_version": "0.1.0",
+  "review_status": "human_reviewed_draft",
+  "source": {
+    "file_name": "灯火阑珊 - 2026-04-10@19h46m12s980ms.jsonl",
+    "sha256": "9c9eb144581289e62aeed5cd0565cb2bd47aff0e1df5dab71e8959cc7e4a7df6",
+    "round_start": 1,
+    "round_end": 20
+  },
+  "expected_events": [
+    {
+      "index": 1,
+      "label": "驿站毁剑后决定拜师离开",
+      "status": "finalized",
+      "start_anchors": [
+        {
+          "source_ref": "r0001.user",
+          "start_quote": "茫然地看着自己的手"
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "label": "云海途中点明剑骨与不甘",
+      "status": "finalized",
+      "start_anchors": [
+        {
+          "source_ref": "r0004.user",
+          "start_quote": "高空的罡风吹得我脸上生痛"
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "label": "抵达剑庐并安顿听剑崖",
+      "status": "finalized",
+      "start_anchors": [
+        {
+          "source_ref": "r0009.assistant",
+          "start_quote": "遁光开始下降"
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "label": "石屋疗伤并拒绝林寒邀约",
+      "status": "finalized",
+      "start_anchors": [
+        {
+          "source_ref": "r0011.user",
+          "start_quote": "回到房间，盘腿坐在床上"
+        }
+      ]
+    },
+    {
+      "index": 5,
+      "label": "领取物资、玉牌认主并收到谕令",
+      "status": "pending_finalization",
+      "start_anchors": [
+        {
+          "source_ref": "r0014.assistant",
+          "start_quote": "便在你目光落向窗外时，石屋外的小径上，传来一阵脚步声"
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "label": "外出熟悉剑庐并遇见苏晴",
+      "status": "forming",
+      "start_anchors": [
+        {
+          "source_ref": "r0018.user",
+          "start_quote": "推开门，走出石屋"
+        },
+        {
+          "source_ref": "r0018.assistant",
+          "start_quote": "你自青岩石床上起身"
+        }
+      ]
+    }
+  ]
+}

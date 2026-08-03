@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:memory:source_event_reference:0.1.0",
+  "title": "SourceEventReferenceComponent 0.1.0",
+  "description": "保存促成当前 Memory 的一个或多个 Event 权威引用。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "event_refs": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": { "const": "event" }
+                    }
+                  }
+                ]
+              },
+              "description": "至少一个客观 Event 锚点；Memory 内容可以是主观、错误或不完整认知。"
+            },
+            "acquisition_mode": {
+              "enum": [
+                "witnessed_event",
+                "heard_from_character",
+                "read_from_record",
+                "inferred_from_events",
+                "generated_summary",
+                "implanted_by_event",
+                "unknown_from_event"
+              ],
+              "description": "Memory 所有者如何基于这些 Event 形成认知。"
+            }
+          },
+          "required": ["event_refs", "acquisition_mode"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

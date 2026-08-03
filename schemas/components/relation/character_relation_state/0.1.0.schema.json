@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:relation:character_relation_state:0.1.0",
+  "title": "CharacterRelationStateComponent 0.1.0",
+  "description": "保存两个 Character 当前分别如何对待对方的自然语义状态。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "directional_states": {
+              "type": "array",
+              "maxItems": 2,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "from_character_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "character" }
+                        }
+                      }
+                    ]
+                  },
+                  "toward_character_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "character" }
+                        }
+                      }
+                    ]
+                  },
+                  "summary": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 2000,
+                    "description": "当前对待对方的综合态度、倾向和行为方式。"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "maxItems": 24,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100,
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "description": "用于检索的少量语义标签，不替代 summary。"
+                  }
+                },
+                "required": [
+                  "from_character_ref",
+                  "toward_character_ref",
+                  "summary"
+                ],
+                "additionalProperties": false
+              },
+              "description": "允许为空或只记录一个方向；同一方向最多一项。"
+            }
+          },
+          "required": ["directional_states"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

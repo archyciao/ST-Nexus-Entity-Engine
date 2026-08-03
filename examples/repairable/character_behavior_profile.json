@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "0.1.0",
+  "data": {
+    "personality": {
+      "summary": "洒脱重情，面对弱者受欺时通常主动相助。",
+      "traits": ["洒脱", "重情"],
+      "tendencies": ["朋友受威胁时倾向直接介入。"]
+    },
+    "motivation": [
+      {
+        "entry_id": "motivation_01K2ABCDEFGHJKMNPQRSTV0101",
+        "description": "保护自己认可的朋友。"
+      }
+    ],
+    "preference": [
+      {
+        "entry_id": "preference_01K2ABCDEFGHJKMNPQRSTV0103",
+        "attitude": "like",
+        "subject": "美酒"
+      }
+    ]
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "directional_states": [
+      {
+        "from_character_ref": {
+          "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+          "type": "character"
+        },
+        "toward_character_ref": {
+          "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+          "type": "character"
+        },
+        "summary": "仍敬重对方，但已经有所警惕。",
+        "trust": 60
+      }
+    ]
+  }
+}

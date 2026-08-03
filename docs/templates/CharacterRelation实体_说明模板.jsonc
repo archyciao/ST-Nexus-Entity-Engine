@@ -1,0 +1,173 @@
+// 一、文件级总览
+//
+// 功能：展示一个 Character Relation Entity 的完整结构，帮助人和 AI 理解
+// “同一人物对只有一个关系实体、多个关系面向集中保存”的设计。
+// 架构位置：这是说明模板，不是运行时数据；系统不会读取 docs/templates。
+// 运作流程：先由端点确定人物对，再读取关系面向和双向当前状态；需要解释
+// 理解单方认知的形成原因时，通过 RelationMemoryIndex 的引用预览选择 Memory；
+// 共同事实不强制绑定 Memory，需要核对客观过程时再按需加载 Event。
+// 输入与输出：本文件没有运行输入输出，只提供与正式 JSON 对照的中文结构说明。
+
+{
+  // 二、结构级说明
+  //
+  // Entity 外壳给出稳定身份、类型和引用预览中的总体描述。
+  "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+  "type": "character_relation",
+  "description": "两人是师徒；双方当前态度并不对称。",
+
+  "components": {
+    // RelationEndpointReference 只定义无序人物对，不保存谁是师父。
+    "relation_endpoint_reference": {
+      "schema_version": "0.1.0",
+      "data": {
+        // 三、字段级说明
+        //
+        // participant_refs 固定两项并按 Character ID 升序保存。
+        "participant_refs": [
+          {
+            "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+            "type": "character"
+          },
+          {
+            "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+            "type": "character"
+          }
+        ]
+      }
+    },
+
+    // CharacterRelationAspects 把师徒、合作、猜疑等关系放在同一数组。
+    "character_relation_aspects": {
+      "schema_version": "0.1.0",
+      "data": {
+        "aspects": [
+          {
+            // aspect_id 是系统生成的局部稳定 ID，不是新的 Entity ID。
+            "aspect_id": "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0201",
+            // kind 用于粗筛；真实含义以 description 为准。
+            "kind": "master_disciple",
+            "description": "甲是乙长期教养的弟子，乙是甲的授业师父。",
+            "status": "active",
+            // perspective 区分共同事实与某个人的单方认知。
+            // shared_fact 即使双方角色不对称，也不要求 formation_basis Memory。
+            "perspective": {
+              "mode": "shared_fact"
+            },
+            // 角色语义和它所属的 Character 放在同一项，避免平行数组错位。
+            "participant_roles": [
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                },
+                "roles": ["disciple"]
+              },
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                },
+                "roles": ["master"]
+              }
+            ],
+            // disclosure 是客观隐瞒设置；人物实际知情程度仍由 Memory 决定。
+            "disclosure": {
+              "visibility": "public",
+              "concealed_from_refs": []
+            }
+          },
+          {
+            "aspect_id": "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0202",
+            "kind": "personal_distrust",
+            "description": "乙把甲视为正在隐瞒秘密、需要继续试探的人。",
+            "status": "active",
+            // character_view 必须写明看法属于谁，并由该 Character 的 Memory 支撑。
+            "perspective": {
+              "mode": "character_view",
+              "owner_ref": {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                "type": "character"
+              }
+            },
+            "participant_roles": [
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                },
+                "roles": ["suspected_person"]
+              },
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                },
+                "roles": ["distrustful_observer"]
+              }
+            ],
+            "disclosure": {
+              "visibility": "secret",
+              "concealed_from_refs": [
+                {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+
+    // CharacterRelationState 保存双方当前如何对待对方，不把双向状态压成一个数值。
+    "character_relation_state": {
+      "schema_version": "0.1.0",
+      "data": {
+        "directional_states": [
+          {
+            "from_character_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+              "type": "character"
+            },
+            "toward_character_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+              "type": "character"
+            },
+            "summary": "仍然敬重对方，但因近期试探开始有所警惕。",
+            "tags": ["respectful", "guarded"]
+          }
+        ]
+      }
+    },
+
+    // RelationMemoryIndex 是反向索引，可由 Memory 的直接 Relation 链接重建。
+    // 只有 character_view 面向强制要求 formation_basis；共同事实可以没有本组件。
+    "relation_memory_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "memory_refs": [
+          {
+            // 同一 Memory 的目标、相关面向和用途放在一项中。
+            "memory_ref": {
+              "id": "memory_01K2ABCDEFGHJKMNPQRSTV000S",
+              "type": "memory"
+            },
+            "related_aspect_ids": [
+              "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0202"
+            ],
+            "index_roles": ["formation_basis"]
+          }
+        ]
+      }
+    },
+
+    // HistoryIndex 汇集多次累积变化所对应的 Event，不设单一 created_by_event_ref。
+    "history_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "event_refs": []
+      }
+    }
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:memory_reference:0.1.0",
+  "title": "MemoryReferenceComponent 0.1.0",
+  "description": "保存 Character 主动保留在当前上下文中的少量 Memory 引用，不代替全部 Memory 目录。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "memory_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "memory_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "memory" }
+                        }
+                      }
+                    ]
+                  },
+                  "reference_roles": {
+                    "type": "array",
+                    "items": {
+                      "enum": ["pinned", "active_context"]
+                    },
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "description": "同一 Memory 在当前 Character 上承担的固定或活跃上下文用途。"
+                  }
+                },
+                "required": ["memory_ref", "reference_roles"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["memory_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}
