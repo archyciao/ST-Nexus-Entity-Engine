@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:skill:skill_progression:0.1.0",
+  "title": "SkillProgressionComponent 0.1.0",
+  "description": "保存 Skill 公共进阶阶段、MUV 绑定和按用途召回的上下文块；不保存任何 Character 当前值。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "progression_summary": { "type": "string", "minLength": 1, "maxLength": 1500 },
+            "ordered": { "type": "boolean" },
+            "stage_evaluation": {
+              "type": "object",
+              "properties": {
+                "mode": { "enum": ["semantic", "numeric_derived", "hybrid"] },
+                "numeric_bindings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "numeric_binding_id": { "type": "string", "pattern": "^skill_numeric_binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                      "provider": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                      "variable_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "value_source": { "enum": ["character_skill_reference", "host", "external_variable_store"] }
+                    },
+                    "required": ["numeric_binding_id", "provider", "variable_key", "value_source"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["mode", "numeric_bindings"],
+              "additionalProperties": false
+            },
+            "stages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "skill_stage_id": { "type": "string", "pattern": "^skill_stage_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "order": { "type": "integer", "minimum": 0 },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "entry_guidance": { "type": "string", "minLength": 1, "maxLength": 1200 },
+                  "exit_guidance": { "type": "string", "minLength": 1, "maxLength": 1200 },
+                  "numeric_guidance": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "numeric_binding_id": { "type": "string", "pattern": "^skill_numeric_binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                        "min_inclusive": { "type": "number" },
+                        "max_exclusive": { "type": "number" }
+                      },
+                      "required": ["numeric_binding_id", "min_inclusive", "max_exclusive"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "context_blocks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "stage_context_id": { "type": "string", "pattern": "^skill_stage_context_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                        "purpose": { "enum": ["character_behavior", "interaction", "narration", "skill_use", "resolver_rule"] },
+                        "content": { "type": "string", "minLength": 1, "maxLength": 1800 }
+                      },
+                      "required": ["stage_context_id", "purpose", "content"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["skill_stage_id", "name", "description", "numeric_guidance", "context_blocks"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["progression_summary", "ordered", "stage_evaluation", "stages"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

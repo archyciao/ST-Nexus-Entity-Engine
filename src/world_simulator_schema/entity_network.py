@@ -1,8 +1,9 @@
 """Entity 之间的引用校验与可重建索引投影。
 
 文件功能：把一组完整 Entity 当作一个封闭测试网络，检查每条引用是否真的指向
-存在且类型一致的目标，并用权威 Reference 自动重建 Character、Location、Event、
-Relation 侧的反向 Index。它解决单个 EntityValidator 无法读取目标 Entity 的问题。
+存在且类型一致的目标，并用权威 Reference 自动重建 Character、Location、Item、
+Organization、Event 与 Relation 侧的反向 Index。它解决单个 EntityValidator
+无法读取目标 Entity、阶段框架或容器链的问题。
 
 架构位置：本模块位于单 Entity 校验之后、持久化写入之前。Reference 是事实方向，
 Index 只是固定代码产生的查询入口；本模块不会让索引反向覆盖 Memory、Event 或
@@ -19,6 +20,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .entity_validator import EntityValidator
+from .stage_context import StageContextError, build_stage_context
 from .validator import ValidationIssue
 
 
@@ -49,6 +51,11 @@ class EntityNetworkValidator:
         "history_index",
         "event_memory_index",
         "relation_memory_index",
+        "inventory_index",
+        "containment_index",
+        "contents_index",
+        "child_location_index",
+        "child_organization_index",
     }
 
     def __init__(self, project_root: str | Path):
@@ -109,12 +116,33 @@ class EntityNetworkValidator:
                 by_id[entity_id] = entity
 
         errors.extend(self._validate_registered_references(entity_list, by_id))
+        errors.extend(_validate_character_skill_stage_links(entity_list, by_id))
         errors.extend(_validate_memory_network_requirements(entity_list, by_id))
         errors.extend(_validate_memory_reference_ownership(entity_list, by_id))
         errors.extend(_validate_witnessed_memory_participation(entity_list, by_id))
         errors.extend(_validate_relation_memory_ownership(entity_list, by_id))
         errors.extend(_validate_event_participant_uniqueness(entity_list))
+        errors.extend(_validate_event_related_entity_uniqueness(entity_list))
         errors.extend(_validate_event_location_sequence_uniqueness(entity_list))
+        errors.extend(_validate_item_placement_network(entity_list, by_id))
+        errors.extend(
+            _validate_parent_cycles(
+                entity_list,
+                entity_type="location",
+                component_name="parent_location_reference",
+                reference_field="parent_location_ref",
+                code="LOCATION_PARENT_CYCLE",
+            )
+        )
+        errors.extend(
+            _validate_parent_cycles(
+                entity_list,
+                entity_type="organization",
+                component_name="parent_organization_reference",
+                reference_field="parent_organization_ref",
+                code="ORGANIZATION_PARENT_CYCLE",
+            )
+        )
 
         projected = rebuild_derived_indexes(entity_list)
         projected_by_id = {
@@ -194,11 +222,9 @@ def rebuild_derived_indexes(
 ) -> list[dict[str, Any]]:
     """根据权威 Reference 返回重建反向 Index 后的深拷贝。
 
-    当前稳定闭环包括：Memory Owner → Character MemoryIndex、Event Participant →
-    Character HistoryIndex、Event Location → Location HistoryIndex、Relation Endpoint
-    → Character RelationIndex、Memory Source Event → EventMemoryIndex，以及 Memory
-    Relation Context → RelationMemoryIndex。HistoryIndex 还可能来自未来的状态变化
-    引用，因此函数只更新当前已实现来源的 ``recent`` 角色，保留其他检索角色。
+    当前稳定闭环还包括 Event 相关对象的 History、Location/Organization 的直接
+    父引用反向目录，以及 Item CurrentPlacement 反向生成 Character Inventory、
+    Location Containment 和 Item Contents。Index 不能反向覆盖这些权威 Reference。
     """
 
     result = copy.deepcopy(list(entities))
@@ -212,8 +238,14 @@ def rebuild_derived_indexes(
     memories_by_event: dict[str, set[str]] = defaultdict(set)
     events_by_character: dict[str, set[str]] = defaultdict(set)
     events_by_location: dict[str, set[str]] = defaultdict(set)
+    events_by_related_entity: dict[str, set[str]] = defaultdict(set)
     relations_by_character: dict[str, set[str]] = defaultdict(set)
     relation_memory_links: dict[str, dict[str, dict[str, set[str]]]] = defaultdict(dict)
+    child_locations: dict[str, set[str]] = defaultdict(set)
+    child_organizations: dict[str, set[str]] = defaultdict(set)
+    inventory_by_character: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    contents_by_item: dict[str, set[str]] = defaultdict(set)
+    contents_by_location: dict[str, list[dict[str, Any]]] = defaultdict(list)
 
     for entity in result:
         if not isinstance(entity, dict):
@@ -271,6 +303,16 @@ def rebuild_derived_indexes(
                 )
                 if location_id is not None:
                     events_by_location[location_id].add(entity_id)
+            for entry in _component_data(
+                entity, "event_related_entity_reference"
+            ).get("related_entity_refs", []):
+                related_entity_id = _reference_id(
+                    entry.get("related_entity_ref")
+                    if isinstance(entry, dict)
+                    else None
+                )
+                if related_entity_id is not None:
+                    events_by_related_entity[related_entity_id].add(entity_id)
 
         elif entity_type == "character_relation":
             for participant_ref in _component_data(
@@ -279,6 +321,60 @@ def rebuild_derived_indexes(
                 participant_id = _reference_id(participant_ref)
                 if participant_id is not None:
                     relations_by_character[participant_id].add(entity_id)
+
+        elif entity_type == "character":
+            location_id = _reference_id(
+                _component_data(entity, "current_location_reference").get("location_ref")
+            )
+            if location_id is not None:
+                contents_by_location[location_id].append(
+                    {
+                        "entity_ref": {"id": entity_id, "type": "character"},
+                        "containment_role": "present",
+                    }
+                )
+
+        elif entity_type == "location":
+            parent_id = _reference_id(
+                _component_data(entity, "parent_location_reference").get(
+                    "parent_location_ref"
+                )
+            )
+            if parent_id is not None:
+                child_locations[parent_id].add(entity_id)
+
+        elif entity_type == "organization":
+            parent_id = _reference_id(
+                _component_data(entity, "parent_organization_reference").get(
+                    "parent_organization_ref"
+                )
+            )
+            if parent_id is not None:
+                child_organizations[parent_id].add(entity_id)
+
+        elif entity_type == "item":
+            placement = _component_data(entity, "current_placement_reference")
+            target = placement.get("placement_ref")
+            target_id = _reference_id(target)
+            target_type = target.get("type") if isinstance(target, dict) else None
+            role = placement.get("placement_role")
+            if target_type == "character" and target_id is not None:
+                if role in {"carried", "equipped", "worn"}:
+                    inventory_by_character[target_id].append(
+                        {
+                            "item_ref": {"id": entity_id, "type": "item"},
+                            "inventory_roles": [role],
+                        }
+                    )
+            elif target_type == "item" and target_id is not None:
+                contents_by_item[target_id].add(entity_id)
+            elif target_type == "location" and target_id is not None:
+                contents_by_location[target_id].append(
+                    {
+                        "entity_ref": {"id": entity_id, "type": "item"},
+                        "containment_role": "stored" if role == "stored" else "placed",
+                    }
+                )
 
     for entity_id, entity in by_id.items():
         entity_type = entity.get("type")
@@ -298,9 +394,63 @@ def rebuild_derived_indexes(
                 "character_relation",
             )
             _upsert_history_index(entity, events_by_character.get(entity_id, set()))
+            _replace_index_component(
+                entity,
+                "inventory_index",
+                "item_refs",
+                sorted(
+                    inventory_by_character.get(entity_id, []),
+                    key=lambda item: _reference_id(item.get("item_ref")) or "",
+                ),
+            )
 
         elif entity_type == "location":
             _upsert_history_index(entity, events_by_location.get(entity_id, set()))
+            _replace_simple_index(
+                entity,
+                "child_location_index",
+                "location_refs",
+                child_locations.get(entity_id, set()),
+                "location",
+            )
+            _replace_index_component(
+                entity,
+                "containment_index",
+                "entity_refs",
+                sorted(
+                    contents_by_location.get(entity_id, []),
+                    key=lambda item: _reference_id(item.get("entity_ref")) or "",
+                ),
+            )
+
+        elif entity_type == "item":
+            _upsert_history_index(
+                entity, events_by_related_entity.get(entity_id, set())
+            )
+            _replace_simple_index(
+                entity,
+                "contents_index",
+                "item_refs",
+                contents_by_item.get(entity_id, set()),
+                "item",
+            )
+
+        elif entity_type == "organization":
+            _upsert_history_index(
+                entity, events_by_related_entity.get(entity_id, set())
+            )
+            _replace_simple_index(
+                entity,
+                "child_organization_index",
+                "organization_refs",
+                child_organizations.get(entity_id, set()),
+                "organization",
+            )
+
+        elif entity_type in {"skill", "concept"}:
+            _upsert_history_index(
+                entity, events_by_related_entity.get(entity_id, set())
+            )
 
         elif entity_type == "event":
             _replace_simple_index(
@@ -349,6 +499,135 @@ def _validate_memory_network_requirements(
                         f"Memory 缺少形成实体网络所需的 {component_name}。",
                     )
                 )
+    return errors
+
+
+def _validate_character_skill_stage_links(
+    entities: list[dict[str, Any]], by_id: dict[str, dict[str, Any]]
+) -> list[dict[str, str]]:
+    """核对 Character 当前阶段、MUV 值与目标 Skill/Concept 框架。"""
+
+    errors: list[dict[str, str]] = []
+    for entity_index, character in enumerate(entities):
+        if not isinstance(character, dict) or character.get("type") != "character":
+            continue
+        entries = _component_data(character, "skill_reference").get("skill_refs", [])
+        for entry_index, entry in enumerate(entries):
+            if not isinstance(entry, dict) or not isinstance(entry.get("stage_state"), dict):
+                continue
+            stage_state = entry["stage_state"]
+            framework_ref = stage_state.get("framework_ref")
+            framework_id = _reference_id(framework_ref)
+            framework = by_id.get(framework_id) if framework_id is not None else None
+            if not isinstance(framework, dict):
+                continue
+            framework_type = framework.get("type")
+            skill_id = _reference_id(entry.get("skill_ref"))
+            path = (
+                f"/entities/{entity_index}/components/skill_reference/data/"
+                f"skill_refs/{entry_index}/stage_state"
+            )
+            if framework_type == "skill" and framework_id != skill_id:
+                errors.append(
+                    _issue(
+                        "SKILL_STAGE_FRAMEWORK_MISMATCH",
+                        f"{path}/framework_ref",
+                        "Skill 自身阶段框架必须来自当前 skill_ref；共享框架应引用 Concept。",
+                    )
+                )
+                continue
+            component_name = (
+                "skill_progression" if framework_type == "skill" else "stage_framework"
+            )
+            framework_data = _component_data(framework, component_name)
+            if not framework_data:
+                errors.append(
+                    _issue(
+                        "STAGE_FRAMEWORK_COMPONENT_MISSING",
+                        f"{path}/framework_ref",
+                        f"目标 {framework_type} 没有可供解析的 {component_name}。",
+                    )
+                )
+                continue
+
+            evaluation = framework_data.get("stage_evaluation")
+            framework_mode = evaluation.get("mode") if isinstance(evaluation, dict) else None
+            host_mode = stage_state.get("evaluation_mode")
+            if framework_mode != host_mode:
+                errors.append(
+                    _issue(
+                        "STAGE_EVALUATION_MODE_MISMATCH",
+                        f"{path}/evaluation_mode",
+                        "Host 的 evaluation_mode 必须与所引用阶段框架一致。",
+                    )
+                )
+                continue
+
+            id_field = "skill_stage_id" if framework_type == "skill" else "stage_id"
+            stage_ids = {
+                stage.get(id_field)
+                for stage in framework_data.get("stages", [])
+                if isinstance(stage, dict) and isinstance(stage.get(id_field), str)
+            }
+            current_stage_id = stage_state.get("current_stage_id")
+            if isinstance(current_stage_id, str) and current_stage_id not in stage_ids:
+                errors.append(
+                    _issue(
+                        "UNKNOWN_HOST_STAGE",
+                        f"{path}/current_stage_id",
+                        "Host 当前阶段不存在于所引用的 Skill/Concept 阶段框架。",
+                    )
+                )
+
+            binding_ids = {
+                item.get("numeric_binding_id")
+                for item in framework_data.get("stage_evaluation", {}).get(
+                    "numeric_bindings", []
+                )
+                if isinstance(item, dict)
+                and isinstance(item.get("numeric_binding_id"), str)
+            }
+            numeric_values: dict[str, float] = {}
+            numeric_bindings_valid = True
+            for value_index, value in enumerate(stage_state.get("numeric_values", [])):
+                if not isinstance(value, dict):
+                    continue
+                binding_id = value.get("numeric_binding_id")
+                number = value.get("value")
+                if binding_id not in binding_ids:
+                    numeric_bindings_valid = False
+                    errors.append(
+                        _issue(
+                            "UNKNOWN_HOST_NUMERIC_BINDING",
+                            f"{path}/numeric_values/{value_index}/numeric_binding_id",
+                            "Host MUV 当前值引用了阶段框架中不存在的 Binding。",
+                        )
+                    )
+                elif isinstance(number, (int, float)) and not isinstance(number, bool):
+                    numeric_values[str(binding_id)] = float(number)
+
+            if host_mode == "numeric_derived" and numeric_bindings_valid:
+                try:
+                    package = build_stage_context(
+                        framework_data,
+                        numeric_values=numeric_values,
+                    )
+                except StageContextError as exc:
+                    errors.append(
+                        _issue(exc.code, f"{path}/numeric_values", str(exc))
+                    )
+                else:
+                    if (
+                        isinstance(current_stage_id, str)
+                        and current_stage_id != package["current_stage_id"]
+                    ):
+                        errors.append(
+                            _issue(
+                                "STALE_NUMERIC_STAGE_CACHE",
+                                f"{path}/current_stage_id",
+                                "缓存阶段与当前 MUV 确定性投影不一致，应由脚本重建。",
+                            )
+                        )
     return errors
 
 
@@ -541,6 +820,138 @@ def _validate_event_location_sequence_uniqueness(
     return errors
 
 
+def _validate_event_related_entity_uniqueness(
+    entities: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    """同一 Event 中同一相关 Entity 只保留一个条目。"""
+
+    errors: list[dict[str, str]] = []
+    for entity_index, event in enumerate(entities):
+        if not isinstance(event, dict) or event.get("type") != "event":
+            continue
+        seen: set[str] = set()
+        entries = _component_data(event, "event_related_entity_reference").get(
+            "related_entity_refs", []
+        )
+        for related_index, entry in enumerate(entries):
+            related_entity_id = _reference_id(
+                entry.get("related_entity_ref") if isinstance(entry, dict) else None
+            )
+            if related_entity_id is None:
+                continue
+            if related_entity_id in seen:
+                errors.append(
+                    _issue(
+                        "DUPLICATE_EVENT_RELATED_ENTITY",
+                        f"/entities/{entity_index}/components/event_related_entity_reference/data/related_entity_refs/{related_index}/related_entity_ref",
+                        "同一 Entity 在 Event 相关对象中只能出现一次；作用应合并。",
+                    )
+                )
+            seen.add(related_entity_id)
+    return errors
+
+
+def _validate_item_placement_network(
+    entities: list[dict[str, Any]], by_id: dict[str, dict[str, Any]]
+) -> list[dict[str, str]]:
+    """检查 Item 容器目标能力与袋中袋放置循环。"""
+
+    errors: list[dict[str, str]] = []
+    parent_items: dict[str, str] = {}
+    entity_positions: dict[str, int] = {}
+    for index, entity in enumerate(entities):
+        if not isinstance(entity, dict) or entity.get("type") != "item":
+            continue
+        item_id = entity.get("id")
+        if not isinstance(item_id, str):
+            continue
+        entity_positions[item_id] = index
+        placement = _component_data(entity, "current_placement_reference")
+        target = placement.get("placement_ref")
+        target_id = _reference_id(target)
+        target_type = target.get("type") if isinstance(target, dict) else None
+        if target_type != "item" or target_id is None:
+            continue
+        parent_items[item_id] = target_id
+        target_entity = by_id.get(target_id)
+        target_components = (
+            target_entity.get("components", {}) if isinstance(target_entity, dict) else {}
+        )
+        if not isinstance(target_components, dict) or "container_profile" not in target_components:
+            errors.append(
+                _issue(
+                    "ITEM_PLACED_IN_NON_CONTAINER",
+                    f"/entities/{index}/components/current_placement_reference/data/placement_ref",
+                    "Item 只能放入具有 ContainerProfile 的目标 Item。",
+                )
+            )
+
+    for item_id, start_index in entity_positions.items():
+        seen: set[str] = set()
+        current = item_id
+        while current in parent_items:
+            if current in seen:
+                errors.append(
+                    _issue(
+                        "ITEM_PLACEMENT_CYCLE",
+                        f"/entities/{start_index}/components/current_placement_reference",
+                        "Item 放置链不能回到自身或形成容器循环。",
+                    )
+                )
+                break
+            seen.add(current)
+            current = parent_items[current]
+    return errors
+
+
+def _validate_parent_cycles(
+    entities: list[dict[str, Any]],
+    *,
+    entity_type: str,
+    component_name: str,
+    reference_field: str,
+    code: str,
+) -> list[dict[str, str]]:
+    """检查 Location 与 Organization 的单父层级不能形成循环。"""
+
+    parents: dict[str, str] = {}
+    positions: dict[str, int] = {}
+    for index, entity in enumerate(entities):
+        if not isinstance(entity, dict) or entity.get("type") != entity_type:
+            continue
+        entity_id = entity.get("id")
+        if not isinstance(entity_id, str):
+            continue
+        positions[entity_id] = index
+        parent_id = _reference_id(
+            _component_data(entity, component_name).get(reference_field)
+        )
+        if parent_id is not None:
+            parents[entity_id] = parent_id
+
+    errors: list[dict[str, str]] = []
+    reported: set[str] = set()
+    for entity_id, index in positions.items():
+        current = entity_id
+        seen: set[str] = set()
+        while current in parents:
+            if current in seen:
+                signature = "|".join(sorted(seen))
+                if signature not in reported:
+                    errors.append(
+                        _issue(
+                            code,
+                            f"/entities/{index}/components/{component_name}",
+                            f"{entity_type} 的直接父级引用不能形成循环。",
+                        )
+                    )
+                    reported.add(signature)
+                break
+            seen.add(current)
+            current = parents[current]
+    return errors
+
+
 def _validate_projected_indexes(
     entities: list[dict[str, Any]],
     projected_by_id: dict[str, dict[str, Any]],
@@ -728,6 +1139,40 @@ def _canonical_component(component_name: str, value: Any) -> str:
                                 entry[field].sort()
                     entries.sort(
                         key=lambda entry: _reference_id(entry.get("memory_ref")) or ""
+                        if isinstance(entry, dict)
+                        else ""
+                    )
+            elif component_name in {
+                "child_location_index",
+                "contents_index",
+                "child_organization_index",
+            }:
+                field_name = {
+                    "child_location_index": "location_refs",
+                    "contents_index": "item_refs",
+                    "child_organization_index": "organization_refs",
+                }[component_name]
+                refs = data.get(field_name)
+                if isinstance(refs, list):
+                    refs.sort(key=lambda item: _reference_id(item) or "")
+            elif component_name == "inventory_index":
+                entries = data.get("item_refs")
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if isinstance(entry, dict) and isinstance(
+                            entry.get("inventory_roles"), list
+                        ):
+                            entry["inventory_roles"].sort()
+                    entries.sort(
+                        key=lambda entry: _reference_id(entry.get("item_ref")) or ""
+                        if isinstance(entry, dict)
+                        else ""
+                    )
+            elif component_name == "containment_index":
+                entries = data.get("entity_refs")
+                if isinstance(entries, list):
+                    entries.sort(
+                        key=lambda entry: _reference_id(entry.get("entity_ref")) or ""
                         if isinstance(entry, dict)
                         else ""
                     )

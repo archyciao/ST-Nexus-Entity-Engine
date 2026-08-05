@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:skill_reference:0.2.0",
+  "title": "SkillReferenceComponent 0.2.0",
+  "description": "保存 Character 已掌握 Skill 的语义熟练度，以及可选的显式阶段或 MUV 当前值接口。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.2.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "skill_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "skill_ref": {
+                    "allOf": [
+                      { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                      { "type": "object", "properties": { "type": { "const": "skill" } } }
+                    ]
+                  },
+                  "proficiency_description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+                  "stage_state": {
+                    "type": "object",
+                    "properties": {
+                      "evaluation_mode": { "enum": ["semantic", "numeric_derived", "hybrid"] },
+                      "framework_ref": {
+                        "allOf": [
+                          { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                          { "type": "object", "properties": { "type": { "enum": ["skill", "concept"] } } }
+                        ]
+                      },
+                      "current_stage_id": { "type": "string", "pattern": "^(?:skill_stage|concept_stage)_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                      "numeric_values": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "numeric_binding_id": { "type": "string", "pattern": "^(?:skill_numeric_binding|stage_numeric_binding)_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                            "value": { "type": "number" }
+                          },
+                          "required": ["numeric_binding_id", "value"],
+                          "additionalProperties": false
+                        }
+                      }
+                    },
+                    "required": ["evaluation_mode", "framework_ref", "numeric_values"],
+                    "additionalProperties": false
+                  }
+                },
+                "required": ["skill_ref", "proficiency_description"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["skill_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

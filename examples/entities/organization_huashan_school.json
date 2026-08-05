@@ -1,0 +1,78 @@
+{
+  "id": "organization_01K2ABCDEFGHJKMNPQRSTV0501",
+  "type": "organization",
+  "description": "华山派是以华山为根基、以剑术传承和师徒秩序维系的江湖门派，重视门规、声誉与正道身份。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-08-05T10:00:00+08:00",
+        "updated_at": "2026-08-05T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {"primary_name": "华山派", "aliases": ["华山剑派"]}
+    },
+    "organization_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "organization_kind": "martial_school",
+        "public_role": "传授华山剑术并参与江湖正道事务。",
+        "operating_scope": "以华山山门和弟子活动网络为中心。",
+        "continuity_basis": "通过师徒传承、门规和共同门派身份延续。"
+      }
+    },
+    "organization_structure": {
+      "schema_version": "0.1.0",
+      "data": {
+        "governance_model": "由掌门统摄门派事务，师长按辈分教授和约束弟子。",
+        "roles": [
+          {
+            "organization_role_id": "organization_role_01K2ABCDEFGHJKMNPQRSTV0502",
+            "role_key": "leader",
+            "name": "掌门",
+            "description": "主持门派决策、传承与对外事务。"
+          }
+        ]
+      }
+    },
+    "organization_culture": {
+      "schema_version": "0.1.0",
+      "data": {
+        "summary": "强调名门正派身份、师徒伦理和门派声誉。",
+        "core_values": ["守护门派声誉", "尊师重道"],
+        "norms": ["弟子应服从师长约束"],
+        "taboos": ["公开背叛师门"],
+        "behavioral_style": "对外谨慎维护正道形象，对内重视秩序和服从。"
+      }
+    },
+    "organization_strategy": {
+      "schema_version": "0.1.0",
+      "data": {
+        "long_term_directions": [
+          {
+            "organization_direction_id": "organization_direction_01K2ABCDEFGHJKMNPQRSTV0503",
+            "description": "维持华山派在江湖正道中的地位和武学传承。"
+          }
+        ],
+        "decision_style": "优先考虑门派声誉、实力保存和对外正当性。"
+      }
+    },
+    "organization_objective": {
+      "schema_version": "0.1.0",
+      "data": {
+        "objectives": [
+          {
+            "objective_id": "objective_01K2ABCDEFGHJKMNPQRSTV0504",
+            "description": "查清近期异常武学传闻是否会威胁门派。",
+            "horizon": "medium_term"
+          }
+        ]
+      }
+    }
+  }
+}

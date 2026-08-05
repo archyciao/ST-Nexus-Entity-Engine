@@ -6,6 +6,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +79,13 @@ def event_update(slot: str, source_ref: str, quote: str) -> dict:
     }
 
 
+def partition_event_update(partition_key: str, source_ref: str, quote: str) -> dict:
+    update = event_update("", source_ref, quote)
+    update.pop("slot")
+    update["partition_key"] = partition_key
+    return update
+
+
 class AirpExtractionProbeTests(unittest.TestCase):
     def test_first_batch_failure_can_recover_from_initial_checkpoint(self) -> None:
         event_plan = {
@@ -102,6 +110,37 @@ class AirpExtractionProbeTests(unittest.TestCase):
         self.assertEqual([], state["events"])
         self.assertEqual(event_plan, recovered_event)
         self.assertEqual(memory_plan, recovered_memory)
+
+    def test_failed_processed_plan_recovers_from_raw_model_reply(self) -> None:
+        raw_plan = {
+            "old_forming_disposition": "absent",
+            "boundary_merges": [],
+            "additional_starts": [],
+            "event_updates": [
+                partition_event_update(
+                    "round_0001", "r0001.assistant", "“原始关键对白。”"
+                )
+            ],
+        }
+        damaged_plan = json.loads(json.dumps(raw_plan))
+        damaged_plan["event_updates"][0]["new_key_details"] = []
+        failed_result = {
+            "validation_errors": ["旧脚本处理失败"],
+            "parsed_plan": damaged_plan,
+        }
+        record = "\n".join(
+            [
+                "<details><summary>第 1 次候选：模型完整正式回复</summary>",
+                f"<pre>```json\n{html.escape(json.dumps(raw_plan))}\n```</pre>",
+                "</details>",
+                f"<pre>{html.escape(json.dumps(failed_result))}</pre>",
+            ]
+        )
+
+        state, plans = PROBE.recovery_state_and_current_plans(record)
+
+        self.assertEqual([], state["events"])
+        self.assertEqual(raw_plan, plans["event"])
 
     def test_recovery_selects_only_plans_after_last_committed_round(self) -> None:
         state = PROBE.initial_unified_state()
@@ -190,6 +229,83 @@ class AirpExtractionProbeTests(unittest.TestCase):
         self.assertEqual(12, PROBE._processed_round_end(before_16))
         self.assertIn("event", plans)
 
+    def test_recovery_reads_event_only_record_from_single_file_appendix(self) -> None:
+        state = PROBE.initial_unified_state()
+        state["events"] = [
+            {"id": "event_probe_001", "source_refs": ["r0008.assistant"]}
+        ]
+        prior = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            f"<pre>{html.escape(json.dumps({'state_after_batch': state}))}</pre>"
+        )
+        record = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            "## 附录：本次复测启动前的校准或未提交记录\n"
+            f"<pre>{html.escape(prior)}</pre>"
+        )
+        recovered_state, _ = PROBE.recovery_state_and_current_plans(record)
+        self.assertEqual(8, PROBE._processed_round_end(recovered_state))
+
+    def test_recovery_does_not_borrow_an_older_completed_boundary_plan(self) -> None:
+        latest = PROBE.initial_unified_state()
+        latest["events"] = [
+            {"id": "event_latest", "source_refs": ["r0004.assistant"]}
+        ]
+        older = PROBE.initial_unified_state()
+        older["events"] = [
+            {"id": "event_older", "source_refs": ["r0008.assistant"]}
+        ]
+        older_plan = {
+            "parsed_plan": {
+                "old_forming_disposition": "keep_distinct",
+                "event_updates": [],
+                "segments": [{"source_refs": ["r0008.assistant"]}],
+            }
+        }
+        latest_run = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            f"<pre>{html.escape(json.dumps({'state_after_batch': latest}))}</pre>"
+        )
+        older_run = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            f"<pre>{html.escape(json.dumps({'state_after_batch': older}))}</pre>\n"
+            f"<pre>{html.escape(json.dumps(older_plan))}</pre>"
+        )
+        flattened = latest_run + "\n\n---\n\n" + older_run
+
+        recovered_state, plans = PROBE.recovery_state_and_current_plans(flattened)
+
+        self.assertEqual(4, PROBE._processed_round_end(recovered_state))
+        self.assertNotIn("event", plans)
+
+    def test_recovery_understands_flattened_history_inside_appendix(self) -> None:
+        latest = PROBE.initial_unified_state()
+        latest["events"] = [
+            {"id": "event_latest", "source_refs": ["r0004.assistant"]}
+        ]
+        older = PROBE.initial_unified_state()
+        older["events"] = [
+            {"id": "event_older", "source_refs": ["r0008.assistant"]}
+        ]
+        latest_run = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            f"<pre>{html.escape(json.dumps({'state_after_batch': latest}))}</pre>"
+        )
+        older_run = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            f"<pre>{html.escape(json.dumps({'state_after_batch': older}))}</pre>"
+        )
+        history = latest_run + "\n\n---\n\n" + older_run
+        current = (
+            "# 240 Event 边界与内容单路短回归完整记录\n"
+            "## 附录：本次复测启动前的校准或未提交记录\n"
+            f"<pre>{html.escape(history)}</pre>"
+        )
+
+        recovered_state, _ = PROBE.recovery_state_and_current_plans(current)
+
+        self.assertEqual(4, PROBE._processed_round_end(recovered_state))
+
     def test_record_history_is_flattened_instead_of_recursively_duplicated(self) -> None:
         oldest = (
             "# 240 Event、Memory 与全 Entity 单次提取复测完整记录\n"
@@ -220,21 +336,547 @@ class AirpExtractionProbeTests(unittest.TestCase):
             PROBE._nearest_source_quote(source, "高空的罡风刮得我脸上生痛"),
         )
 
-    def test_attention_prompt_does_not_force_a_boundary(self) -> None:
+    def test_first_segment_anchor_is_fixed_to_batch_opening(self) -> None:
+        rounds = [sample_round()]
+        plan = {
+            "old_forming_disposition": "absent",
+            "decision_reason": "本批是一段连续的山门相遇。",
+            "boundary_uncertainties": [],
+            "segments": [
+                {
+                    "slot": "new_1",
+                    "source_refs": ["r0001.user", "r0001.assistant"],
+                    "start_anchors": [
+                        {
+                            "source_ref": "r0001.assistant",
+                            "start_quote": "乙问",
+                        }
+                    ],
+                }
+            ],
+            "event_updates": [event_update("new_1", "r0001.user", "甲走进山门")],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+        first_anchor = normalized["segments"][0]["start_anchors"][0]
+        self.assertEqual("r0001.user", first_anchor["source_ref"])
+        self.assertEqual("甲走进山门。", first_anchor["start_quote"])
+        errors, _ = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+
+    def test_key_detail_is_restored_to_exact_source_without_retry(self) -> None:
+        rounds = [
+            sample_round(
+                user="甲御风而行。",
+                assistant="高空的罡风吹得我脸上生痛，我低头看向脚下。",
+            )
+        ]
+        update = event_update(
+            "new_1", "r0001.assistant", "高空的罡风刮得我脸上生痛"
+        )
+        plan = {
+            "old_forming_disposition": "absent",
+            "decision_reason": "御风途中保持连续。",
+            "boundary_uncertainties": [],
+            "segments": [
+                {
+                    "slot": "new_1",
+                    "source_refs": ["r0001.user", "r0001.assistant"],
+                    "start_anchors": [
+                        {"source_ref": "r0001.user", "start_quote": "甲御风而行"}
+                    ],
+                }
+            ],
+            "event_updates": [update],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+        detail = normalized["event_updates"][0]["new_key_details"][0]
+        self.assertEqual("高空的罡风吹得我脸上生痛", detail["content"])
+        self.assertEqual(["r0001.assistant"], detail["source_refs"])
+        self.assertEqual(1, len(normalized["script_detail_repairs"]))
+
+    def test_unverifiable_key_detail_is_soft_dropped(self) -> None:
+        rounds = [sample_round()]
+        update = event_update("new_1", "r0001.user", "甲走进山门")
+        update["new_key_details"][0]["content"] = "原文从未出现的长篇对白内容"
+        plan = {
+            "old_forming_disposition": "absent",
+            "decision_reason": "本批保持连续。",
+            "boundary_uncertainties": [],
+            "segments": [
+                {
+                    "slot": "new_1",
+                    "source_refs": ["r0001.user", "r0001.assistant"],
+                    "start_anchors": [
+                        {"source_ref": "r0001.user", "start_quote": "甲走进山门"}
+                    ],
+                }
+            ],
+            "event_updates": [update],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], normalized["event_updates"][0]["new_key_details"])
+        self.assertEqual(1, len(normalized["script_detail_drops"]))
+        errors, warnings = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+        self.assertTrue(any("软性丢弃" in warning for warning in warnings))
+
+    def test_event_beat_is_reassigned_by_unique_segment_source(self) -> None:
+        rounds = [
+            sample_round(
+                user="甲进门查看空屋。",
+                assistant="乙随后到场递交书信。",
+            )
+        ]
+        first_update = event_update("new_1", "r0001.user", "甲进门查看空屋")
+        first_update["event_beats_add"].append(
+            {"content": "乙随后到场递交书信。", "source_refs": ["r0001.assistant"]}
+        )
+        second_update = event_update(
+            "new_2", "r0001.assistant", "乙随后到场递交书信"
+        )
+        plan = {
+            "old_forming_disposition": "absent",
+            "decision_reason": "查看空屋落地后，递信开启新的局部互动。",
+            "boundary_uncertainties": [],
+            "segments": [
+                {
+                    "slot": "new_1",
+                    "source_refs": ["r0001.user"],
+                    "start_anchors": [
+                        {"source_ref": "r0001.user", "start_quote": "甲进门查看空屋"}
+                    ],
+                },
+                {
+                    "slot": "new_2",
+                    "source_refs": ["r0001.assistant"],
+                    "start_anchors": [
+                        {
+                            "source_ref": "r0001.assistant",
+                            "start_quote": "乙随后到场递交书信",
+                        }
+                    ],
+                },
+            ],
+            "event_updates": [first_update, second_update],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual(1, len(normalized["event_updates"][0]["event_beats_add"]))
+        self.assertEqual(2, len(normalized["event_updates"][1]["event_beats_add"]))
+        self.assertEqual(1, len(normalized["script_beat_reassignments"]))
+        errors, _ = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+
+    def test_updates_for_merged_rounds_are_coalesced_without_retry(self) -> None:
+        rounds = [
+            sample_round(1, "甲走进山门。", "乙询问来意。"),
+            sample_round(2, "甲说明来意。", "乙放行。"),
+        ]
+        first = partition_event_update("round_0001", "r0001.user", "甲走进山门")
+        first["title"] = "走入山门"
+        first["description"] = "甲走入山门，守门人询问来意。"
+        second = partition_event_update("round_0002", "r0002.user", "甲说明来意")
+        second["title"] = "说明来意并获准"
+        second["description"] = "甲说明来意后获准进入。"
+        plan = {
+            "old_forming_disposition": "absent",
+            "boundary_merges": [
+                {
+                    "candidate_id": "before_round_0002",
+                    "reason_code": "same_unfinished_activity",
+                }
+            ],
+            "additional_starts": [],
+            "event_updates": [first, second],
+        }
+
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+
+        self.assertEqual(1, len(normalized["event_updates"]))
+        update = normalized["event_updates"][0]
+        self.assertEqual("round_0001", update["partition_key"])
+        self.assertEqual("new_1", update["slot"])
+        self.assertEqual(2, len(update["event_beats_add"]))
+        self.assertIn("走入山门", update["title"])
+        self.assertIn("说明来意并获准", update["title"])
+        self.assertEqual(
+            [{"from_partition_key": "round_0002", "to_partition_key": "round_0001"}],
+            normalized["script_update_coalesces"],
+        )
+        errors, warnings = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+        self.assertTrue(any("重复 Event 更新" in warning for warning in warnings))
+
+    def test_unassigned_update_without_batch_facts_is_dropped(self) -> None:
+        rounds = [sample_round(1, "甲走进山门。", "乙询问来意。")]
+        empty_old_tail = partition_event_update(
+            "existing_forming_tail", "r0001.user", "不会保留"
+        )
+        empty_old_tail["event_beats_add"] = []
+        empty_old_tail["new_key_details"] = []
+        actual = partition_event_update(
+            "round_0001", "r0001.user", "甲走进山门"
+        )
+        state = PROBE.initial_unified_state()
+        state["events"] = [{"status": "forming"}]
+        plan = {
+            "old_forming_disposition": "keep_distinct",
+            "boundary_merges": [],
+            "additional_starts": [],
+            "event_updates": [empty_old_tail, actual],
+        }
+
+        normalized = PROBE.normalize_event_plan(plan, state, rounds)
+
+        self.assertEqual(1, len(normalized["event_updates"]))
+        self.assertEqual(
+            "round_0001", normalized["event_updates"][0]["partition_key"]
+        )
+        self.assertEqual(
+            [
+                {
+                    "partition_key": "existing_forming_tail",
+                    "reason": "not_in_final_partition_and_no_batch_delta",
+                }
+            ],
+            normalized["script_noop_update_drops"],
+        )
+
+    def test_unassigned_update_with_batch_fact_is_not_silently_dropped(self) -> None:
+        rounds = [sample_round(1, "甲走进山门。", "乙询问来意。")]
+        unassigned = partition_event_update(
+            "existing_forming_tail", "r0001.user", "甲走进山门"
+        )
+        actual = partition_event_update(
+            "round_0001", "r0001.assistant", "乙询问来意"
+        )
+        state = PROBE.initial_unified_state()
+        state["events"] = [{"status": "forming"}]
+        plan = {
+            "old_forming_disposition": "keep_distinct",
+            "boundary_merges": [],
+            "additional_starts": [],
+            "event_updates": [unassigned, actual],
+        }
+
+        normalized = PROBE.normalize_event_plan(plan, state, rounds)
+
+        self.assertEqual(2, len(normalized["event_updates"]))
+        self.assertEqual([], normalized["script_noop_update_drops"])
+
+    def test_attention_prompt_uses_default_boundaries_without_a_thinking_chain(self) -> None:
         self.assertNotIn("记全 → 分准 → 不漏分", PROBE.EVENT_SYSTEM_PROMPT)
-        self.assertIn("本身不要求合并", PROBE.EVENT_ATTENTION_GUIDE)
-        self.assertIn("本身也不形成边界", PROBE.EVENT_ATTENTION_GUIDE)
-        self.assertIn("不为数量调整结果", PROBE.EVENT_ATTENTION_GUIDE)
-        self.assertIn("中断后恢复", PROBE.EVENT_ATTENTION_GUIDE)
-        self.assertNotIn("抵达、治疗、邀约", PROBE.EVENT_ATTENTION_GUIDE)
-        self.assertNotIn("驿站", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertIn("候选交界默认保留", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertIn("不单独\n决定合并", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertIn("defer_until_later_context", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertIn("boundary_merges", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertNotIn("按以下顺序", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertNotIn("局部事件卡", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertNotIn("逐处比较", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertNotIn("交叉检查", PROBE.EVENT_ATTENTION_GUIDE)
+        self.assertIn("最左侧 partition_key", PROBE.EVENT_SYSTEM_PROMPT)
+        self.assertIn("不要为 existing_forming_tail 返回空更新", PROBE.EVENT_SYSTEM_PROMPT)
         prompt = PROBE.build_event_prompt(
             PROBE.initial_unified_state(), [sample_round()], 1
         )
+        self.assertIn('"source_blocks"', prompt)
+        self.assertIn('"boundary_candidates"', prompt)
         self.assertTrue(prompt.endswith(PROBE.EVENT_ATTENTION_GUIDE))
 
+    def test_script_marks_scene_place_change_as_a_boundary_clue(self) -> None:
+        rounds = [
+            sample_round(
+                1,
+                "甲在驿站收剑。",
+                "[场景时间：边境古道·天元243年3月1日]\n甲随乙离开。",
+            ),
+            sample_round(
+                2,
+                "甲在高空发问。",
+                "[场景时间：神州·苍穹·天元243年3月1日]\n乙回答。",
+            ),
+        ]
+        blocks = PROBE.event_source_blocks(rounds)
+        candidates = PROBE.event_boundary_candidates(
+            PROBE.initial_unified_state(), blocks
+        )
+        self.assertEqual("边境古道", blocks[0]["scene_places"][0])
+        self.assertEqual("神州·苍穹", blocks[1]["scene_places"][0])
+        self.assertIn("乙回答", blocks[1]["closing"]["quote"])
+        self.assertEqual("before_round_0002", candidates[0]["candidate_id"])
+        self.assertEqual(
+            "scene_place_change", candidates[0]["script_clues"][0]["kind"]
+        )
+        self.assertEqual("keep_boundary", candidates[0]["default_action"])
+        self.assertEqual(
+            "defer_until_later_context", candidates[0]["merge_policy"]
+        )
+
+    def test_scene_change_merge_is_deferred_until_later_context(self) -> None:
+        rounds = [
+            sample_round(
+                1,
+                "甲在驿站收剑。",
+                "[场景时间：边境古道·天元243年3月1日]\n甲随乙离开。",
+            ),
+            sample_round(
+                2,
+                "甲在高空发问。",
+                "[场景时间：神州·苍穹·天元243年3月1日]\n乙回答。",
+            ),
+        ]
+        plan = {
+            "old_forming_disposition": "absent",
+            "boundary_merges": [
+                {
+                    "candidate_id": "before_round_0002",
+                    "reason_code": "same_unfinished_activity",
+                }
+            ],
+            "additional_starts": [],
+        }
+
+        segments, partition = PROBE.derive_event_segments(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+
+        self.assertEqual(2, len(segments))
+        self.assertEqual([], partition["merged_boundary_ids"])
+        self.assertEqual(
+            ["before_round_0002"], partition["deferred_merge_ids"]
+        )
+        self.assertTrue(any("合并请求已暂缓" in item for item in partition["warnings"]))
+
+    def test_script_derives_segments_from_only_merged_candidate_ids(self) -> None:
+        rounds = [
+            sample_round(1, "甲在驿站醒来。", "乙毁去甲的旧剑。"),
+            sample_round(2, "甲决定随乙离开。", "乙答应收徒。"),
+            sample_round(3, "甲走出驿站。", "两人御空离开。"),
+            sample_round(4, "甲在云海发问。", "乙开始解释剑骨。"),
+        ]
+        plan = {
+            "old_forming_disposition": "absent",
+            "boundary_merges": [
+                {
+                    "candidate_id": "before_round_0002",
+                    "reason_code": "same_unfinished_activity",
+                },
+                {
+                    "candidate_id": "before_round_0003",
+                    "reason_code": "direct_aftermath",
+                },
+            ],
+            "additional_starts": [],
+            "event_updates": [
+                partition_event_update("round_0001", "r0001.assistant", "乙毁去甲的旧剑"),
+                partition_event_update("round_0004", "r0004.assistant", "乙开始解释剑骨"),
+            ],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+
+        self.assertEqual(["new_1", "new_2"], [item["slot"] for item in normalized["segments"]])
+        self.assertEqual(
+            ["round_0001", "round_0004"],
+            [item["partition_key"] for item in normalized["segments"]],
+        )
+        self.assertEqual(
+            ["new_1", "new_2"],
+            [item["slot"] for item in normalized["event_updates"]],
+        )
+        self.assertEqual(
+            ["before_round_0002", "before_round_0003"],
+            normalized["script_partition"]["merged_boundary_ids"],
+        )
+        errors, _ = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+
+    def test_script_partition_can_be_rebuilt_without_changing_source(self) -> None:
+        rounds = [sample_round(number) for number in range(1, 5)]
+        state = PROBE.initial_unified_state()
+        merged_plan = {
+            "old_forming_disposition": "absent",
+            "boundary_merges": [
+                {"candidate_id": "before_round_0002"},
+                {"candidate_id": "before_round_0003"},
+            ],
+            "additional_starts": [],
+        }
+        first, first_snapshot = PROBE.derive_event_segments(
+            merged_plan, state, rounds
+        )
+        default, _ = PROBE.derive_event_segments(
+            {
+                "old_forming_disposition": "absent",
+                "boundary_merges": [],
+                "additional_starts": [],
+            },
+            state,
+            rounds,
+        )
+        rebuilt, rebuilt_snapshot = PROBE.derive_event_segments(
+            merged_plan, state, rounds
+        )
+
+        expected_refs = [
+            message["ref"] for message in PROBE.batch_messages(rounds)
+        ]
+        self.assertEqual(2, len(first))
+        self.assertEqual(4, len(default))
+        self.assertEqual(first, rebuilt)
+        self.assertEqual(first_snapshot, rebuilt_snapshot)
+        self.assertEqual(
+            expected_refs,
+            list(dict.fromkeys(ref for segment in first for ref in segment["source_refs"])),
+        )
+
+    def test_script_can_add_a_new_event_start_inside_one_message(self) -> None:
+        rounds = [sample_round(1, "甲旁观。", "旧事结束。新谈判开始。")]
+        plan = {
+            "old_forming_disposition": "absent",
+            "boundary_merges": [],
+            "additional_starts": [
+                {
+                    "start_id": "inside_1",
+                    "source_ref": "r0001.assistant",
+                    "start_quote": "新谈判开始",
+                }
+            ],
+            "event_updates": [
+                partition_event_update("round_0001", "r0001.assistant", "旧事结束"),
+                partition_event_update("inside_1", "r0001.assistant", "新谈判开始"),
+            ],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+
+        self.assertEqual(["new_1", "new_2"], [item["slot"] for item in normalized["segments"]])
+        self.assertEqual(
+            ["r0001.assistant"],
+            normalized["segments"][1]["source_refs"],
+        )
+        self.assertEqual(
+            "新谈判开始",
+            normalized["segments"][1]["start_anchors"][0]["start_quote"],
+        )
+        errors, _ = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+
+    def test_plain_time_header_is_not_mistaken_for_a_location(self) -> None:
+        rounds = [
+            sample_round(1, "甲等待。", "[时间：寅时]\n风声渐急。"),
+            sample_round(2, "甲继续等待。", "[时间：卯时]\n天色渐亮。"),
+        ]
+        blocks = PROBE.event_source_blocks(rounds)
+        candidates = PROBE.event_boundary_candidates(
+            PROBE.initial_unified_state(), blocks
+        )
+        self.assertEqual([], blocks[0]["scene_places"])
+        self.assertEqual([], blocks[1]["scene_places"])
+        self.assertEqual([], candidates[0]["script_clues"])
+
+    def test_ignored_strong_script_boundary_is_only_a_soft_warning(self) -> None:
+        rounds = [
+            sample_round(
+                1,
+                "甲在驿站收剑。",
+                "[场景时间：边境古道·天元243年3月1日]\n乙问：‘来者何人？’",
+            ),
+            sample_round(
+                2,
+                "甲在高空发问。",
+                "[场景时间：神州·苍穹·天元243年3月1日]\n乙回答。",
+            ),
+        ]
+        update = event_update("new_1", "r0001.assistant", "来者何人")
+        plan = {
+            "old_forming_disposition": "absent",
+            "decision_reason": "模型判断为连续经历。",
+            "boundary_uncertainties": [],
+            "segments": [
+                {
+                    "slot": "new_1",
+                    "source_refs": [
+                        "r0001.user",
+                        "r0001.assistant",
+                        "r0002.user",
+                        "r0002.assistant",
+                    ],
+                    "start_anchors": [
+                        {"source_ref": "r0001.user", "start_quote": "甲在驿站收剑"}
+                    ],
+                }
+            ],
+            "event_updates": [update],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+        errors, warnings = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+        self.assertTrue(any("过粗风险" in warning for warning in warnings))
+
+    def test_unique_invalid_event_update_slot_is_repaired_without_retry(self) -> None:
+        rounds = [sample_round()]
+        update = event_update("forming_tests", "r0001.assistant", "来者何人")
+        plan = {
+            "old_forming_disposition": "absent",
+            "decision_reason": "首次记录。",
+            "boundary_uncertainties": [],
+            "segments": [
+                {
+                    "slot": "new_1",
+                    "source_refs": ["r0001.user", "r0001.assistant"],
+                    "start_anchors": [
+                        {"source_ref": "r0001.user", "start_quote": "甲走进山门"}
+                    ],
+                }
+            ],
+            "event_updates": [update],
+        }
+        normalized = PROBE.normalize_event_plan(
+            plan, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual("new_1", normalized["event_updates"][0]["slot"])
+        self.assertEqual(
+            [{"model_slot": "forming_tests", "script_slot": "new_1"}],
+            normalized["script_slot_repairs"],
+        )
+        errors, warnings = PROBE.validate_event_plan(
+            normalized, PROBE.initial_unified_state(), rounds
+        )
+        self.assertEqual([], errors)
+        self.assertTrue(any("slot 笔误" in warning for warning in warnings))
+
     def test_event_prompt_renders_single_json_braces_and_short_description_target(self) -> None:
-        self.assertIn('"segments": [{', PROBE.EVENT_SYSTEM_PROMPT)
+        self.assertIn('"boundary_merges": [{', PROBE.EVENT_SYSTEM_PROMPT)
+        self.assertIn('"partition_key":', PROBE.EVENT_SYSTEM_PROMPT)
+        self.assertNotIn('"segments": [{', PROBE.EVENT_SYSTEM_PROMPT)
         self.assertNotIn("{{", PROBE.EVENT_SYSTEM_PROMPT)
         self.assertIn("六十至一百二十个汉字", PROBE.EVENT_SYSTEM_PROMPT)
 
@@ -258,18 +900,79 @@ class AirpExtractionProbeTests(unittest.TestCase):
         self.assertEqual(["event"], list(specs))
         self.assertEqual(32768, args.event_max_tokens)
         self.assertEqual(90.0, args.stream_idle_timeout)
+        self.assertEqual(90.0, args.content_start_timeout)
+
+    def test_transport_failure_preserves_partial_formal_content_and_metadata(self) -> None:
+        failure = PROBE.ChatCompletionTransportError(
+            "正式正文启动超时",
+            partial_content='{"partial":',
+            metadata={
+                "reasoning_chars": 25000,
+                "content_chars": 11,
+                "finish_reason": None,
+                "timing_seconds": {"total": 90.0},
+            },
+        )
+        with patch.object(PROBE, "call_chat_completion", side_effect=failure):
+            result = PROBE.run_model_task(
+                task="event",
+                endpoint="https://example.invalid/v1/chat/completions",
+                api_key="test-only",
+                model="test-model",
+                system_prompt="system",
+                user_prompt="user",
+                timeout=300,
+                max_tokens=32768,
+                thinking_mode="off",
+                response_format="text",
+                stream_idle_timeout=90,
+                content_start_timeout=90,
+                candidate_attempt_limit=1,
+                transport_attempt_limit=1,
+                normalizer=lambda value: value,
+                validator=lambda value: ([], []),
+            )
+        self.assertFalse(result["ok"])
+        attempt = result["attempts"][0]
+        self.assertEqual('{"partial":', attempt["raw"])
+        self.assertEqual(25000, attempt["api"]["reasoning_chars"])
 
     def test_event_only_record_does_not_claim_entity_network_validation(self) -> None:
         record = PROBE.render_record(
             {
                 "task_set": "event",
+                "checkpoint_round_end": 4,
                 "batches": [],
                 "gold_evaluation": {},
                 "final_state": PROBE.initial_unified_state(),
             }
         )
         self.assertIn("Event 边界与内容单路短回归", record)
+        self.assertIn("最近已提交检查点：第 4 轮", record)
         self.assertNotIn("最终正式 Entity 网络", record)
+
+    def test_off_mode_uses_zen_dual_disable_controls(self) -> None:
+        body = PROBE.chat_completion_request_body(
+            "deepseek-v4-flash-free",
+            "system",
+            "user",
+            32768,
+            thinking_mode="off",
+            response_format="text",
+        )
+
+        self.assertEqual({"type": "disabled"}, body["thinking"])
+        self.assertEqual("none", body["reasoning_effort"])
+        self.assertEqual(0, body["temperature"])
+        self.assertNotIn("reasoning", body)
+        self.assertNotIn("think", body)
+        self.assertNotIn("enable_thinking", body)
+
+    def test_gold_scope_must_match_requested_round_range(self) -> None:
+        gold = {"source": {"round_end": 16}}
+        PROBE.validate_gold_scope(gold, batch_size=4, batch_count=4)
+        with self.assertRaisesRegex(ValueError, "样例到第 16 轮，测试到第 20 轮"):
+            PROBE.validate_gold_scope(gold, batch_size=4, batch_count=5)
 
     def test_event_prompt_delegates_entity_references_to_script(self) -> None:
         self.assertNotIn('"participants_add"', PROBE.EVENT_SYSTEM_PROMPT)
@@ -690,6 +1393,53 @@ class AirpExtractionProbeTests(unittest.TestCase):
                 }
             ],
         }
+        state["entity_candidates"]["location:山门"]["domain_data"] = {
+            "profile": {
+                "location_kind": "mountain_gate",
+                "primary_functions": ["通行", "守卫"],
+                "scale_description": "足以供多人并行通过。",
+                "spatial_characteristics": ["石阶连接山道"],
+            }
+        }
+        state["entity_candidates"]["item:旧剑"]["domain_data"] = {
+            "profile": {
+                "item_kind": "sword",
+                "instance_mode": "individual",
+                "primary_functions": ["近身格斗"],
+                "materials": ["钢", "木"],
+                "form_description": "一柄剑鞘磨损的旧剑。",
+            },
+            "placement": {
+                "target_key": "character:甲",
+                "role": "carried",
+                "detail": "负在背后。",
+            },
+        }
+        state["entity_candidates"]["organization:青山派"]["domain_data"] = {
+            "profile": {
+                "organization_kind": "martial_school",
+                "public_role": "传授剑术。",
+                "operating_scope": "以青山山门为中心。",
+                "continuity_basis": "依靠师徒传承延续。",
+            }
+        }
+        state["entity_candidates"]["skill:青山剑法"]["domain_data"] = {
+            "definition": {
+                "skill_kind": "sword_art",
+                "domain": "剑术攻防。",
+                "primary_capabilities": ["基础攻防"],
+                "form_description": "以稳健基础剑招构成。",
+            }
+        }
+        state["entity_candidates"]["concept:剑心"]["domain_data"] = {
+            "definition": {
+                "concept_kind": "doctrine_or_theory",
+                "definition": "以心驭剑、临敌守静的一种剑学理论。",
+                "epistemic_status": "attributed_theory",
+                "operational_role": "interpretive_context",
+                "scope_summary": "用于解释部分剑术修习者的理解路径。",
+            }
+        }
         state["events"] = [
             {
                 "id": "event_probe_001",
@@ -774,6 +1524,52 @@ class AirpExtractionProbeTests(unittest.TestCase):
                 "character_relation",
             }.issubset(types)
         )
+        by_type = {entity["type"]: entity for entity in network}
+        character_a = next(
+            entity
+            for entity in network
+            if entity["type"] == "character"
+            and entity["components"]["identity"]["data"]["primary_name"] == "甲"
+        )
+        self.assertIn("location_profile", by_type["location"]["components"])
+        self.assertIn("item_profile", by_type["item"]["components"])
+        self.assertIn("organization_profile", by_type["organization"]["components"])
+        self.assertIn("skill_definition", by_type["skill"]["components"])
+        self.assertIn("concept_definition", by_type["concept"]["components"])
+        self.assertEqual(
+            "character",
+            by_type["item"]["components"]["current_placement_reference"]["data"][
+                "placement_ref"
+            ]["type"],
+        )
+        self.assertEqual(
+            "负在背后。",
+            by_type["item"]["components"]["current_placement_reference"]["data"][
+                "placement_detail"
+            ],
+        )
+        self.assertIn("inventory_index", character_a["components"])
+        event = by_type["event"]
+        related_refs = event["components"]["event_related_entity_reference"][
+            "data"
+        ]["related_entity_refs"]
+        self.assertEqual(
+            {"item", "organization", "skill", "concept"},
+            {
+                entry["related_entity_ref"]["type"]
+                for entry in related_refs
+            },
+        )
+        event_id = event["id"]
+        for entity_type in ("item", "organization", "skill", "concept"):
+            with self.subTest(entity_type=entity_type):
+                history_refs = by_type[entity_type]["components"]["history_index"][
+                    "data"
+                ]["event_refs"]
+                self.assertIn(
+                    event_id,
+                    {entry["event_ref"]["id"] for entry in history_refs},
+                )
 
     def test_witnessed_memory_repairs_missing_event_participant(self) -> None:
         state = PROBE.initial_unified_state()

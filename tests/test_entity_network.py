@@ -228,6 +228,40 @@ class EntityNetworkTests(unittest.TestCase):
         )
         self.assertTrue(report.valid, report.errors)
 
+    def test_event_related_entity_cannot_be_listed_twice(self) -> None:
+        """同一相关对象的多种作用必须合并，不能制造重复引用。"""
+
+        entities = copy.deepcopy(self.source_entities)
+        item = json.loads(
+            (ROOT / "examples/entities/item_hidden_weapon_pouch.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        entities.append(item)
+        event = next(entity for entity in entities if entity["type"] == "event")
+        related_ref = {"id": item["id"], "type": "item"}
+        event["components"]["event_related_entity_reference"] = {
+            "schema_version": "0.1.0",
+            "data": {
+                "related_entity_refs": [
+                    {
+                        "related_entity_ref": copy.deepcopy(related_ref),
+                        "involvement_roles": ["used"],
+                    },
+                    {
+                        "related_entity_ref": copy.deepcopy(related_ref),
+                        "involvement_roles": ["damaged"],
+                    },
+                ]
+            },
+        }
+
+        report = self.validator.validate(rebuild_derived_indexes(entities))
+        self.assertIn(
+            "DUPLICATE_EVENT_RELATED_ENTITY",
+            {entry["code"] for entry in report.errors},
+        )
+
     def test_witnessed_memory_owner_must_be_an_event_participant(self) -> None:
         """亲历者不能拥有来源 Event 的 Memory，却从该 Event 参与目录中消失。"""
 

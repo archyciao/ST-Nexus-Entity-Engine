@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:concept:stage_framework:0.1.0",
+  "title": "StageFrameworkComponent 0.1.0",
+  "description": "保存共享阶段体系、MUV 绑定和按用途召回的上下文块；不保存任何 Host 当前值。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "framework_summary": { "type": "string", "minLength": 1, "maxLength": 1800 },
+            "ordered": { "type": "boolean" },
+            "stage_evaluation": {
+              "type": "object",
+              "properties": {
+                "mode": { "enum": ["semantic", "numeric_derived", "hybrid"] },
+                "numeric_bindings": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "numeric_binding_id": { "type": "string", "pattern": "^stage_numeric_binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                      "provider": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                      "variable_key": { "type": "string", "minLength": 1, "maxLength": 200 },
+                      "value_source": { "enum": ["host", "character_skill_reference", "external_variable_store"] }
+                    },
+                    "required": ["numeric_binding_id", "provider", "variable_key", "value_source"],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": ["mode", "numeric_bindings"],
+              "additionalProperties": false
+            },
+            "stages": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "stage_id": { "type": "string", "pattern": "^concept_stage_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "name": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "order": { "type": "integer", "minimum": 0 },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 1800 },
+                  "entry_guidance": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "exit_guidance": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "numeric_guidance": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "numeric_binding_id": { "type": "string", "pattern": "^stage_numeric_binding_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                        "min_inclusive": { "type": "number" },
+                        "max_exclusive": { "type": "number" }
+                      },
+                      "required": ["numeric_binding_id", "min_inclusive", "max_exclusive"],
+                      "additionalProperties": false
+                    }
+                  },
+                  "context_blocks": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "stage_context_id": { "type": "string", "pattern": "^concept_stage_context_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                        "purpose": { "enum": ["character_behavior", "interaction", "narration", "skill_use", "resolver_rule"] },
+                        "content": { "type": "string", "minLength": 1, "maxLength": 1800 }
+                      },
+                      "required": ["stage_context_id", "purpose", "content"],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": ["stage_id", "name", "description", "numeric_guidance", "context_blocks"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["framework_summary", "ordered", "stage_evaluation", "stages"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

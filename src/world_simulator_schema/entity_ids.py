@@ -10,8 +10,8 @@ ID 是否符合 ``type_series`` 规则。
 组合当前毫秒时间和安全随机数生成 ULID，再返回 ``type_ULID``。既有 Entity
 必须先由上层实体匹配流程查找，不能通过再次生成 ID 代替匹配。
 
-本模块也为 Motivation、Preference 和 Objective 生成组件局部 ID。局部 ID
-沿用“对象种类 + ULID”的易辨识形式，但不是 Entity ID，不能进入 Entity Reference。
+本模块也为 Component 内需要独立定位的语义条目生成局部 ID。局部 ID 沿用
+“对象种类 + ULID”的易辨识形式，但不是 Entity ID，不能进入 Entity Reference。
 
 输出与边界：输出不可变 ID；本模块不查重数据库、不匹配既有 Entity，也不
 负责显示名称。持久化层仍必须设置唯一约束，并在极低概率冲突时重新生成。
@@ -45,7 +45,26 @@ ENTITY_ID_PATTERN: Final[re.Pattern[str]] = re.compile(
 """完整 ``type_series`` ID 格式。"""
 
 LOCAL_ID_KINDS: Final[frozenset[str]] = frozenset(
-    {"motivation", "preference", "objective", "relation_aspect"}
+    {
+        "motivation",
+        "preference",
+        "objective",
+        "relation_aspect",
+        "location_state",
+        "item_state",
+        "organization_role",
+        "organization_direction",
+        "organization_state",
+        "skill_mechanic",
+        "skill_requirement",
+        "skill_numeric_binding",
+        "skill_stage",
+        "skill_stage_context",
+        "concept_rule",
+        "stage_numeric_binding",
+        "concept_stage",
+        "concept_stage_context",
+    }
 )
 """当前允许由系统生成的 Component 局部标识类型。"""
 

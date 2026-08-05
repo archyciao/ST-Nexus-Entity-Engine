@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:inventory_index:0.1.0",
+  "title": "InventoryIndexComponent 0.1.0",
+  "description": "从 Item CurrentPlacementReference 重建 Character 的直接物品栏目录。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "item_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "item_ref": {
+                    "allOf": [
+                      { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                      { "type": "object", "properties": { "type": { "const": "item" } } }
+                    ]
+                  },
+                  "inventory_roles": { "type": "array", "items": { "enum": ["carried", "equipped", "worn"] }, "minItems": 1, "uniqueItems": true }
+                },
+                "required": ["item_ref", "inventory_roles"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["item_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

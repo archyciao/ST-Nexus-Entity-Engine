@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:concept:applicability:0.1.0",
+  "title": "ApplicabilityComponent 0.1.0",
+  "description": "保存 Concept 无法仅用 Entity Reference 表达的适用、排除、例外和前提条件。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "applies_to_entity_types": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }, "uniqueItems": true },
+            "conditions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 900 }, "uniqueItems": true },
+            "exclusions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 900 }, "uniqueItems": true },
+            "exceptions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 900 }, "uniqueItems": true },
+            "prerequisites": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 900 }, "uniqueItems": true }
+          },
+          "required": ["applies_to_entity_types", "conditions", "exclusions", "exceptions", "prerequisites"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

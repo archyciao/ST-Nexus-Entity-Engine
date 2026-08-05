@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:concept:concept_rule:0.1.0",
+  "title": "ConceptRuleComponent 0.1.0",
+  "description": "保存可独立定位的 Concept 规则、适用条件、后果与当前状态。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "concept_rule_id": { "type": "string", "pattern": "^concept_rule_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                  "statement": { "type": "string", "minLength": 1, "maxLength": 1800 },
+                  "applicability": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "consequence": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "status": { "enum": ["active", "inactive", "superseded"] }
+                },
+                "required": ["concept_rule_id", "kind", "statement", "applicability", "consequence", "status"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["rules"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

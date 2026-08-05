@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:world-simulator:schema:component:character:inventory_reference:0.1.0",
-  "title": "InventoryReferenceComponent 0.1.0",
-  "description": "保存 Character 当前携带、穿戴或装备的 Item 引用，不表示法律所有权。",
+  "$id": "urn:world-simulator:schema:component:event:event_related_entity_reference:0.1.0",
+  "title": "EventRelatedEntityReferenceComponent 0.1.0",
+  "description": "保存当前 Event 实际涉及的 Item、Organization、Skill 与 Concept 权威引用。",
   "allOf": [
     {
       "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
@@ -15,12 +15,14 @@
         "data": {
           "type": "object",
           "properties": {
-            "item_refs": {
+            "related_entity_refs": {
               "type": "array",
+              "minItems": 1,
+              "maxItems": 256,
               "items": {
                 "type": "object",
                 "properties": {
-                  "item_ref": {
+                  "related_entity_ref": {
                     "allOf": [
                       {
                         "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
@@ -28,28 +30,34 @@
                       {
                         "type": "object",
                         "properties": {
-                          "type": { "const": "item" }
+                          "type": {
+                            "enum": ["item", "organization", "skill", "concept"]
+                          }
                         }
                       }
                     ]
                   },
-                  "inventory_roles": {
+                  "involvement_roles": {
                     "type": "array",
-                    "items": {
-                      "enum": ["carried", "equipped", "worn"]
-                    },
                     "minItems": 1,
+                    "maxItems": 12,
                     "uniqueItems": true,
-                    "description": "同一 Item 在当前 Character 物品栏中的携带、装备或穿戴角色。"
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 100,
+                      "pattern": "^[a-z][a-z0-9_]*$"
+                    },
+                    "description": "目标对象在本 Event 中的实际作用；第一版至少可使用 involved。"
                   }
                 },
-                "required": ["item_ref", "inventory_roles"],
+                "required": ["related_entity_ref", "involvement_roles"],
                 "additionalProperties": false
               },
-              "description": "同一 Item 的相关角色放在同一引用项中。"
+              "description": "同一目标 Entity 只出现一次，全部作用集中在同一项。"
             }
           },
-          "required": ["item_refs"],
+          "required": ["related_entity_refs"],
           "additionalProperties": false
         }
       }

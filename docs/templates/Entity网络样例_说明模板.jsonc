@@ -35,6 +35,14 @@
       }
     },
     {
+      "id": "item_<系统生成序号>",
+      "type": "item",
+      "description": "Event 中实际被使用的物品",
+      "components": {
+        // Item 的 history_index 同样由 Event 相关对象引用反向重建。
+      }
+    },
+    {
       "id": "event_<系统生成序号>",
       "type": "event",
       "description": "已经发生的客观经历摘要",
@@ -67,6 +75,18 @@
               {
                 "participant_ref": { "id": "character_<系统生成序号>", "type": "character" },
                 "participation_roles": ["actor"]
+              }
+            ]
+          }
+        },
+        // 物品、组织、技能和概念使用同一相关对象组件；正式 ID、去重和反向 HistoryIndex 由脚本处理。
+        "event_related_entity_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "related_entity_refs": [
+              {
+                "related_entity_ref": { "id": "item_<系统生成序号>", "type": "item" },
+                "involvement_roles": ["used"]
               }
             ]
           }

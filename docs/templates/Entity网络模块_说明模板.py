@@ -14,8 +14,10 @@ HistoryIndex 会漏掉自己亲历的事件。固定候选汇合脚本可以先�
 
 二、结构级说明
 Reference 是“事实从谁指向谁”，例如 Memory 指向 Owner Character 和来源 Event；
-Index 是“从另一端怎样快速找回来”，例如 Character 的 MemoryIndex。删除 Index
-只会让查询变慢，固定代码仍可从 Reference 完整重建。
+Event 分别指向参与 Character、实际 Location 及相关 Item、Organization、Skill、
+Concept。Index 是“从另一端怎样快速找回来”，例如 Character 的 MemoryIndex 或
+目标 Entity 的 HistoryIndex。删除 Index 只会让查询变慢，固定代码仍可从 Reference
+完整重建。
 """
 
 from dataclasses import dataclass
@@ -34,7 +36,7 @@ def 示例重建反向索引(entities: list[dict[str, Any]]) -> list[dict[str, A
     """三、步骤级说明
 
     正式实现先读取 Memory、Event 和 Relation 的权威 Reference，再生成 Character、
-    Event 和 Relation 侧的派生目录。这里不修改输入，仅展示调用形状。
+    World Entity、Event 和 Relation 侧的派生目录。这里不修改输入，仅展示调用形状。
     """
 
     return list(entities)

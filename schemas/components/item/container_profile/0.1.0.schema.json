@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:item:container_profile:0.1.0",
+  "title": "ContainerProfileComponent 0.1.0",
+  "description": "保存容器 Item 的稳定容量、容纳限制与访问条件。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "capacity_description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "allowed_contents": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 300 }, "uniqueItems": true },
+            "forbidden_contents": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 300 }, "uniqueItems": true },
+            "stable_capabilities": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true },
+            "access_requirements": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true }
+          },
+          "required": ["capacity_description", "allowed_contents", "forbidden_contents", "stable_capabilities", "access_requirements"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

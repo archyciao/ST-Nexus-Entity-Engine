@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:concept:concept_definition:0.1.0",
+  "title": "ConceptDefinitionComponent 0.1.0",
+  "description": "保存 Concept 的分类、完整定义、认识地位、系统用途和适用范围摘要。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "concept_kind": { "enum": ["world_mechanism", "institutional_rule", "social_cultural", "classification_framework", "doctrine_or_theory", "historical_context", "term_definition"] },
+            "definition": { "type": "string", "minLength": 1, "maxLength": 2400 },
+            "epistemic_status": { "enum": ["objective", "institutionally_defined", "socially_conventional", "attributed_theory", "disputed"] },
+            "operational_role": { "enum": ["resolver_rule", "institutional_norm", "social_norm", "classification", "interpretive_context", "reference_only"] },
+            "scope_summary": { "type": "string", "minLength": 1, "maxLength": 1500 }
+          },
+          "required": ["concept_kind", "definition", "epistemic_status", "operational_role", "scope_summary"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,116 @@
+{
+  "id": "concept_01K2ABCDEFGHJKMNPQRSTV0701",
+  "type": "concept",
+  "description": "关系信任阶段是一套将持续互动中的戒备、合作与信任程度组织为可复用阶段的分类框架，可由 MUV 信任值辅助或直接投影当前阶段。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-08-05T10:00:00+08:00",
+        "updated_at": "2026-08-05T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {"primary_name": "关系信任阶段", "aliases": ["信任阶段"]}
+    },
+    "concept_definition": {
+      "schema_version": "0.1.0",
+      "data": {
+        "concept_kind": "classification_framework",
+        "definition": "依据双方持续互动中表现出的风险预期、信息开放和合作意愿，将关系状态划分为可复用阶段。",
+        "epistemic_status": "institutionally_defined",
+        "operational_role": "classification",
+        "scope_summary": "适用于使用 trust MUV 变量并明确采用本框架的人物或关系。"
+      }
+    },
+    "concept_rule": {
+      "schema_version": "0.1.0",
+      "data": {
+        "rules": [
+          {
+            "concept_rule_id": "concept_rule_01K2ABCDEFGHJKMNPQRSTV0702",
+            "kind": "stage_projection",
+            "statement": "普通回合只召回当前阶段及当前用途的提示块。",
+            "applicability": "Host 已能解析出唯一当前阶段时。",
+            "consequence": "无关阶段不会进入本轮 AI 上下文。",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    "stage_framework": {
+      "schema_version": "0.1.0",
+      "data": {
+        "framework_summary": "用 MUV trust 值确定当前主要关系阶段。",
+        "ordered": true,
+        "stage_evaluation": {
+          "mode": "numeric_derived",
+          "numeric_bindings": [
+            {
+              "numeric_binding_id": "stage_numeric_binding_01K2ABCDEFGHJKMNPQRSTV0703",
+              "provider": "muv",
+              "variable_key": "trust",
+              "value_source": "host"
+            }
+          ]
+        },
+        "stages": [
+          {
+            "stage_id": "concept_stage_01K2ABCDEFGHJKMNPQRSTV0704",
+            "name": "戒备",
+            "order": 0,
+            "description": "可以有限合作，但仍预期对方可能带来风险。",
+            "numeric_guidance": [
+              {
+                "numeric_binding_id": "stage_numeric_binding_01K2ABCDEFGHJKMNPQRSTV0703",
+                "min_inclusive": 0,
+                "max_exclusive": 50
+              }
+            ],
+            "context_blocks": [
+              {
+                "stage_context_id": "concept_stage_context_01K2ABCDEFGHJKMNPQRSTV0705",
+                "purpose": "interaction",
+                "content": "保持试探，不主动交付高风险秘密或关键资源。"
+              }
+            ]
+          },
+          {
+            "stage_id": "concept_stage_01K2ABCDEFGHJKMNPQRSTV0706",
+            "name": "信任",
+            "order": 1,
+            "description": "愿意分享重要信息并承担合作风险。",
+            "numeric_guidance": [
+              {
+                "numeric_binding_id": "stage_numeric_binding_01K2ABCDEFGHJKMNPQRSTV0703",
+                "min_inclusive": 50,
+                "max_exclusive": 101
+              }
+            ],
+            "context_blocks": [
+              {
+                "stage_context_id": "concept_stage_context_01K2ABCDEFGHJKMNPQRSTV0707",
+                "purpose": "interaction",
+                "content": "可以主动分享重要但仍符合角色利益的信息。"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "applicability": {
+      "schema_version": "0.1.0",
+      "data": {
+        "applies_to_entity_types": ["character_relation"],
+        "conditions": ["Host 明确选择本框架并提供 trust 值"],
+        "exclusions": ["纯客观亲属身份不由信任值决定"],
+        "exceptions": [],
+        "prerequisites": ["MUV 变量已通过受控写回形成"]
+      }
+    }
+  }
+}

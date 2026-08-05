@@ -1,0 +1,14 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "related_entity_refs": [
+      {
+        "related_entity_ref": {
+          "id": "item_01K2ABCDEFGHJKMNPQRSTV0009",
+          "type": "item"
+        },
+        "involvement_roles": ["involved"]
+      }
+    ]
+  }
+}

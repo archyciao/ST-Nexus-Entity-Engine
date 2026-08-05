@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:skill:skill_definition:0.1.0",
+  "title": "SkillDefinitionComponent 0.1.0",
+  "description": "保存 Skill 的类别、作用领域、公共能力和稳定组成。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "skill_kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "domain": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "primary_capabilities": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 600 }, "uniqueItems": true },
+            "form_description": { "type": "string", "minLength": 1, "maxLength": 1500 }
+          },
+          "required": ["skill_kind", "domain", "primary_capabilities", "form_description"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

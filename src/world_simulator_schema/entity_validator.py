@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from .entity_ids import is_valid_entity_id
+from .stage_context import validate_stage_framework
 from .validator import ComponentValidator, ValidationIssue
 
 
@@ -129,6 +130,15 @@ class EntityValidator:
 
         if entity_type == "character_relation":
             errors.extend(_validate_character_relation(components))
+        elif entity_type == "item":
+            errors.extend(_validate_item(components))
+        elif entity_type == "concept":
+            errors.extend(_validate_stage_component(components, "stage_framework"))
+        elif entity_type == "skill":
+            errors.extend(_validate_stage_component(components, "skill_progression"))
+
+        if entity_type == "character":
+            errors.extend(_validate_character_skill_stage_state(components))
 
         return EntityValidationReport(
             valid=not errors,
@@ -309,6 +319,144 @@ def _validate_character_relation(components: dict[str, Any]) -> list[dict[str, s
             )
 
     return errors
+
+
+def _validate_item(components: dict[str, Any]) -> list[dict[str, str]]:
+    """检查 Item 堆叠数量和放置角色的跨组件含义。"""
+
+    errors: list[dict[str, str]] = []
+    profile = _component_data(components, "item_profile")
+    state = _component_data(components, "item_state")
+    instance_mode = profile.get("instance_mode")
+    has_quantity = "quantity" in state
+    if instance_mode == "stack" and not has_quantity:
+        errors.append(
+            _issue(
+                "STACK_ITEM_QUANTITY_REQUIRED",
+                "/components/item_state/data/quantity",
+                "stack Item 必须保存当前数量和单位。",
+            )
+        )
+    if instance_mode in {"unique", "individual"} and has_quantity:
+        errors.append(
+            _issue(
+                "NON_STACK_ITEM_HAS_QUANTITY",
+                "/components/item_state/data/quantity",
+                "只有 stack Item 可以保存 quantity。",
+            )
+        )
+
+    placement = _component_data(components, "current_placement_reference")
+    target = placement.get("placement_ref")
+    role = placement.get("placement_role")
+    target_type = target.get("type") if isinstance(target, dict) else None
+    roles_by_target = {
+        "character": {"carried", "equipped", "worn"},
+        "item": {"contained", "stored"},
+        "location": {"placed", "stored"},
+    }
+    if target_type is not None and target_type not in roles_by_target:
+        errors.append(
+            _issue(
+                "ITEM_PLACEMENT_TARGET_TYPE",
+                "/components/current_placement_reference/data/placement_ref/type",
+                "Item 当前放置目标只能是 Character、Item 或 Location。",
+            )
+        )
+    elif target_type in roles_by_target and role not in roles_by_target[target_type]:
+        errors.append(
+            _issue(
+                "ITEM_PLACEMENT_ROLE_MISMATCH",
+                "/components/current_placement_reference/data/placement_role",
+                f"placement_role {role!r} 不适用于 {target_type} 目标。",
+            )
+        )
+    return errors
+
+
+def _validate_stage_component(
+    components: dict[str, Any], component_name: str
+) -> list[dict[str, str]]:
+    """把阶段体系跨数组错误映射到完整 Entity 路径。"""
+
+    component = components.get(component_name)
+    if not isinstance(component, dict) or not isinstance(component.get("data"), dict):
+        return []
+    return [
+        _issue(
+            item.code,
+            f"/components/{component_name}/data{item.path}",
+            item.message,
+        )
+        for item in validate_stage_framework(component["data"])
+    ]
+
+
+def _validate_character_skill_stage_state(
+    components: dict[str, Any]
+) -> list[dict[str, str]]:
+    """检查 SkillReference 中语义阶段和 MUV 当前值的权威边界。"""
+
+    errors: list[dict[str, str]] = []
+    for index, entry in enumerate(_data_array(components, "skill_reference", "skill_refs")):
+        if not isinstance(entry, dict) or not isinstance(entry.get("stage_state"), dict):
+            continue
+        stage_state = entry["stage_state"]
+        mode = stage_state.get("evaluation_mode")
+        current_stage_id = stage_state.get("current_stage_id")
+        numeric_values = stage_state.get("numeric_values", [])
+        path = f"/components/skill_reference/data/skill_refs/{index}/stage_state"
+        if mode in {"semantic", "hybrid"} and not isinstance(current_stage_id, str):
+            errors.append(
+                _issue(
+                    "EXPLICIT_SKILL_STAGE_REQUIRED",
+                    f"{path}/current_stage_id",
+                    f"{mode} 模式必须由 Character SkillReference 保存显式当前阶段。",
+                )
+            )
+        if mode == "semantic" and numeric_values:
+            errors.append(
+                _issue(
+                    "SEMANTIC_SKILL_STAGE_HAS_NUMERIC_VALUE",
+                    f"{path}/numeric_values",
+                    "semantic 模式不应保存 MUV 当前值。",
+                )
+            )
+        if mode == "numeric_derived" and not numeric_values:
+            errors.append(
+                _issue(
+                    "NUMERIC_SKILL_STAGE_VALUE_REQUIRED",
+                    f"{path}/numeric_values",
+                    "numeric_derived 模式必须提供受控写入的 MUV 当前值。",
+                )
+            )
+        seen: set[str] = set()
+        for value_index, value in enumerate(numeric_values):
+            if not isinstance(value, dict):
+                continue
+            binding_id = value.get("numeric_binding_id")
+            if isinstance(binding_id, str) and binding_id in seen:
+                errors.append(
+                    _issue(
+                        "DUPLICATE_SKILL_NUMERIC_VALUE",
+                        f"{path}/numeric_values/{value_index}/numeric_binding_id",
+                        "同一 SkillReference 中一个 numeric_binding_id 只能有一个当前值。",
+                    )
+                )
+            if isinstance(binding_id, str):
+                seen.add(binding_id)
+    return errors
+
+
+def _component_data(
+    components: dict[str, Any], component_name: str
+) -> dict[str, Any]:
+    """安全读取 Component data；缺失或不合法时返回空对象。"""
+
+    component = components.get(component_name)
+    if not isinstance(component, dict) or not isinstance(component.get("data"), dict):
+        return {}
+    return component["data"]
 
 
 def _data_array(

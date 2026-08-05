@@ -131,8 +131,7 @@
         }
       ],
       "allowed_entity_types": [
-        "character",
-        "item"
+        "character"
       ],
       "authority": "authoritative",
       "rebuildable": false,
@@ -209,7 +208,7 @@
       },
       "ai": {
         "title_zh": "当前位置引用组件",
-        "description_zh": "保存 Character 或 Item 当前所在 Location 的权威引用。",
+        "description_zh": "保存 Character 当前所在 Location 的权威引用；Item 改用 CurrentPlacementReference。",
         "usage_notes": [
           "引用只持久化 id 和 type。",
           "位置变化必须经过 Action、Resolver、Event 与 State Projector。"
@@ -262,6 +261,7 @@
       "rebuild_from": [
         "event.event_participant_reference",
         "event.event_location_reference",
+        "event.event_related_entity_reference",
         "event.state_change"
       ],
       "allow_disable": true,
@@ -725,23 +725,25 @@
       "migrations": []
     },
     {
-      "name": "inventory_reference",
+      "name": "inventory_index",
       "namespace": "character",
-      "category": "reference",
+      "category": "index",
       "current_version": "0.1.0",
       "versions": [
         {
           "version": "0.1.0",
-          "schema_id": "urn:world-simulator:schema:component:character:inventory_reference:0.1.0"
+          "schema_id": "urn:world-simulator:schema:component:character:inventory_index:0.1.0"
         }
       ],
       "allowed_entity_types": [
         "character"
       ],
-      "authority": "authoritative",
-      "rebuildable": false,
-      "rebuild_from": [],
-      "allow_disable": false,
+      "authority": "derived",
+      "rebuildable": true,
+      "rebuild_from": [
+        "item.current_placement_reference"
+      ],
+      "allow_disable": true,
       "unknown_field_policy": "reject",
       "permissions": {
         "default": {
@@ -754,13 +756,7 @@
             "admin",
             "migration"
           ],
-          "propose_roles": [
-            "ai",
-            "user",
-            "resolver",
-            "system",
-            "admin"
-          ],
+          "propose_roles": [],
           "write_roles": [
             "projector",
             "system",
@@ -771,11 +767,11 @@
         "fields": []
       },
       "ai": {
-        "title_zh": "角色物品栏引用组件",
-        "description_zh": "保存角色当前携带、装备或穿戴的 Item 引用。",
+        "title_zh": "角色物品栏索引组件",
+        "description_zh": "从 Item 的权威放置引用重建角色当前携带、装备或穿戴的 Item 目录。",
         "usage_notes": [
           "inventory_roles 与对应 item_ref 放在同一项中。",
-          "本组件不表示 Item 的法律所有权。"
+          "本组件可删除重建，不表示 Item 的物理位置或法律所有权。"
         ]
       },
       "correction": {
@@ -800,7 +796,7 @@
             "item"
           ],
           "cardinality": "many",
-          "authority_direction": "host_to_target"
+          "authority_direction": "target_to_host"
         }
       ],
       "migrations": []
@@ -809,11 +805,15 @@
       "name": "skill_reference",
       "namespace": "character",
       "category": "reference",
-      "current_version": "0.1.0",
+      "current_version": "0.2.0",
       "versions": [
         {
           "version": "0.1.0",
           "schema_id": "urn:world-simulator:schema:component:character:skill_reference:0.1.0"
+        },
+        {
+          "version": "0.2.0",
+          "schema_id": "urn:world-simulator:schema:component:character:skill_reference:0.2.0"
         }
       ],
       "allowed_entity_types": [
@@ -853,10 +853,11 @@
       },
       "ai": {
         "title_zh": "角色技能引用组件",
-        "description_zh": "保存角色掌握的 Skill 引用及当前语义熟练度。",
+        "description_zh": "保存角色掌握的 Skill、当前语义熟练度，以及可选的显式阶段或 MUV 当前值接口。",
         "usage_notes": [
           "Skill 定义保存在目标 Skill Entity。",
-          "未来数值熟练度不得替换 proficiency_description。"
+          "MUV 当前值属于 Character SkillReference 或外部变量存储，不得写入 Skill/Concept 定义。",
+          "数值和阶段不得替换 proficiency_description。"
         ]
       },
       "correction": {
@@ -881,6 +882,12 @@
             "skill"
           ],
           "cardinality": "many",
+          "authority_direction": "host_to_target"
+        },
+        {
+          "path": "/data/skill_refs/*/stage_state/framework_ref",
+          "target_types": ["skill", "concept"],
+          "cardinality": "zero_or_one",
           "authority_direction": "host_to_target"
         }
       ],
@@ -1598,6 +1605,63 @@
       "migrations": []
     },
     {
+      "name": "event_related_entity_reference",
+      "namespace": "event",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:event:event_related_entity_reference:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "event"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/related_entity_refs/*/related_entity_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Event 相关对象引用组件",
+        "description_zh": "保存 Event 实际涉及的 Item、Organization、Skill 与 Concept 权威引用。",
+        "usage_notes": [
+          "Character 与实际 Location 分别进入专用 Event 引用组件，不在本组件重复保存。",
+          "仅提及、计划使用或背景知识不得进入本组件。",
+          "目标 Entity 的 HistoryIndex 可由本组件反向重建。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/related_entity_refs/*/related_entity_ref",
+          "target_types": ["item", "organization", "skill", "concept"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
       "name": "event_memory_index",
       "namespace": "event",
       "category": "index",
@@ -1758,6 +1822,437 @@
           "authority_direction": "host_to_target"
         }
       ],
+      "migrations": []
+    },
+    {
+      "name": "location_profile",
+      "namespace": "location",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:location_profile:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "地点档案组件", "description_zh": "保存地点稳定类别、用途、尺度与空间特征。", "usage_notes": ["不保存临时天气、当前活动或占领关系。", "自然语言定义是首期语义权威，类别只用于筛选。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [],
+      "migrations": []
+    },
+    {
+      "name": "environment_profile",
+      "namespace": "location",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:environment_profile:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "地点环境组件", "description_zh": "保存地点长期稳定的自然与人工环境基础。", "usage_notes": ["短时天气、火灾和临时封锁应进入状态或 Process。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "location_atmosphere",
+      "namespace": "location",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:location_atmosphere:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "地点氛围组件", "description_zh": "保存地点典型感官风格与长期文化印象。", "usage_notes": ["它是叙事锚点，不代表所有观察者实际形成相同感受。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "location_state",
+      "namespace": "location",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:location_state:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/states/*/location_state_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "地点状态组件", "description_zh": "保存可独立定位的当前地点状态。", "usage_notes": ["局部 ID 由系统生成；有意义的变化须由 Event 支撑。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/states", "id_field": "location_state_id"}],
+      "migrations": []
+    },
+    {
+      "name": "parent_location_reference",
+      "namespace": "location",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:parent_location_reference:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/parent_location_ref/type", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "直接父地点引用组件", "description_zh": "保存地点的直接物理父地点。", "usage_notes": ["更高层级通过逐级引用取得；父侧目录是可重建索引。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/parent_location_ref", "target_types": ["location"], "cardinality": "one", "authority_direction": "host_to_target"}],
+      "migrations": []
+    },
+    {
+      "name": "child_location_index",
+      "namespace": "location",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:child_location_index:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "derived", "rebuildable": true, "rebuild_from": ["location.parent_location_reference"], "allow_disable": true, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "直接子地点索引", "description_zh": "提供可重建的直接子地点目录。", "usage_notes": ["递归后代在查询时遍历，不复制整棵空间树。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/location_refs/*", "target_types": ["location"], "cardinality": "many", "authority_direction": "target_to_host"}],
+      "migrations": []
+    },
+    {
+      "name": "containment_index",
+      "namespace": "location",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:location:containment_index:0.1.0"}],
+      "allowed_entity_types": ["location"],
+      "authority": "derived", "rebuildable": true, "rebuild_from": ["core.current_location_reference", "item.current_placement_reference"], "allow_disable": true, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "地点直接内容索引", "description_zh": "提供直接位于地点中的 Character 与 Item 目录。", "usage_notes": ["递归内容通过位置链展开；索引不成为第二份位置事实。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/entity_refs/*/entity_ref", "target_types": ["character", "item"], "cardinality": "many", "authority_direction": "target_to_host"}],
+      "migrations": []
+    },
+    {
+      "name": "item_profile",
+      "namespace": "item",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:item:item_profile:0.1.0"}],
+      "allowed_entity_types": ["item"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "物品档案组件", "description_zh": "保存物品类别、实例模式、功能、材料与稳定形态。", "usage_notes": ["unique、individual、stack 表示追踪方式，不表示价值。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "item_characteristic",
+      "namespace": "item",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:item:item_characteristic:0.1.0"}],
+      "allowed_entity_types": ["item"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "物品特征组件", "description_zh": "保存物品稳定外观、工艺、使用表现与象征特征。", "usage_notes": ["隐藏属性仍须遵守权限和披露边界。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "item_state",
+      "namespace": "item",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:item:item_state:0.1.0"}],
+      "allowed_entity_types": ["item"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/states/*/item_state_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "物品状态组件", "description_zh": "保存堆叠数量与可独立定位的当前状态。", "usage_notes": ["quantity 只适用于 stack，跨字段规则由 Entity 校验器检查。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/states", "id_field": "item_state_id"}],
+      "migrations": []
+    },
+    {
+      "name": "container_profile",
+      "namespace": "item",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:item:container_profile:0.1.0"}],
+      "allowed_entity_types": ["item"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "容器物品档案", "description_zh": "保存容器的稳定容量、限制与访问条件。", "usage_notes": ["当前上锁、破损或燃烧属于 ItemState。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "current_placement_reference",
+      "namespace": "item",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:item:current_placement_reference:0.1.0"}],
+      "allowed_entity_types": ["item"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/placement_ref/type", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "物品当前放置引用", "description_zh": "保存物品当前直接位于 Character、Item 或 Location 的唯一物理权威。", "usage_notes": ["物品栏、容器内容和地点内容均由本引用反向重建。", "所有权与当前放置分离。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/placement_ref", "target_types": ["character", "item", "location"], "cardinality": "one", "authority_direction": "host_to_target"}],
+      "migrations": []
+    },
+    {
+      "name": "contents_index",
+      "namespace": "item",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:item:contents_index:0.1.0"}],
+      "allowed_entity_types": ["item"],
+      "authority": "derived", "rebuildable": true, "rebuild_from": ["item.current_placement_reference"], "allow_disable": true, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "容器直接内容索引", "description_zh": "从子 Item 的放置引用重建直接内容物。", "usage_notes": ["递归位置由查询时沿放置链解析。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/item_refs/*", "target_types": ["item"], "cardinality": "many", "authority_direction": "target_to_host"}],
+      "migrations": []
+    },
+    {
+      "name": "organization_profile",
+      "namespace": "organization",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:organization_profile:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "组织档案组件", "description_zh": "保存组织持续身份、公开角色、活动范围和延续依据。", "usage_notes": ["不复制成员、领导者或控制地点清单。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "organization_structure",
+      "namespace": "organization",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:organization_structure:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/roles/*/organization_role_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "组织结构组件", "description_zh": "保存治理方式与职位定义。", "usage_notes": ["职位定义不是任职 Character；实际成员关系属于 Relation。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/roles", "id_field": "organization_role_id"}],
+      "migrations": []
+    },
+    {
+      "name": "organization_culture",
+      "namespace": "organization",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:organization_culture:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "组织文化组件", "description_zh": "保存组织长期形成的价值、规范、禁忌和行事风格。", "usage_notes": ["可复用制度或思想应提升为 Concept，并保留组织语境引用。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "organization_strategy",
+      "namespace": "organization",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:organization_strategy:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/long_term_directions/*/organization_direction_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "组织战略组件", "description_zh": "保存长期方向和决策支点。", "usage_notes": ["不保存执行步骤、进度或 Process 阶段。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/long_term_directions", "id_field": "organization_direction_id"}],
+      "migrations": []
+    },
+    {
+      "name": "organization_objective",
+      "namespace": "organization",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:organization_objective:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/objectives/*/objective_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "组织目标组件", "description_zh": "保存若干中短期目标。", "usage_notes": ["目标只说明要达成什么；进度、步骤和调度属于 Process。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/objectives/*/related_entity_refs/*", "target_types": ["character", "location", "item", "organization", "skill", "concept"], "cardinality": "many", "authority_direction": "host_to_target"}],
+      "item_identity_rules": [{"array_path": "/data/objectives", "id_field": "objective_id"}],
+      "migrations": []
+    },
+    {
+      "name": "organization_state",
+      "namespace": "organization",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:organization_state:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/states/*/organization_state_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "组织状态组件", "description_zh": "保存当前仍有效、会影响组织行动的语义状态。", "usage_notes": ["当前状态不积累完整历史；变化由 Event 记录。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/states", "id_field": "organization_state_id"}],
+      "migrations": []
+    },
+    {
+      "name": "parent_organization_reference",
+      "namespace": "organization",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:parent_organization_reference:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/parent_organization_ref/type", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "直接上级组织引用", "description_zh": "保存正式结构中的直接上级 Organization。", "usage_notes": ["联盟、号令和名义依附不使用此字段。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/parent_organization_ref", "target_types": ["organization"], "cardinality": "one", "authority_direction": "host_to_target"}],
+      "migrations": []
+    },
+    {
+      "name": "child_organization_index",
+      "namespace": "organization",
+      "category": "index",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:organization:child_organization_index:0.1.0"}],
+      "allowed_entity_types": ["organization"],
+      "authority": "derived", "rebuildable": true, "rebuild_from": ["organization.parent_organization_reference"], "allow_disable": true, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "直接下级组织索引", "description_zh": "从子组织的上级引用重建直接下级目录。", "usage_notes": ["只保存直接下级，递归结构查询时展开。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/organization_refs/*", "target_types": ["organization"], "cardinality": "many", "authority_direction": "target_to_host"}],
+      "migrations": []
+    },
+    {
+      "name": "skill_definition",
+      "namespace": "skill",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:skill:skill_definition:0.1.0"}],
+      "allowed_entity_types": ["skill"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "技能定义组件", "description_zh": "保存 Skill 公共类别、领域、能力和稳定组成。", "usage_notes": ["不能由某个高手的一次表现推断所有修习者都能做到。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "skill_mechanics",
+      "namespace": "skill",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:skill:skill_mechanics:0.1.0"}],
+      "allowed_entity_types": ["skill"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/mechanics/*/skill_mechanic_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "技能机制组件", "description_zh": "用稳定局部 ID 保存可单独引用的核心机制。", "usage_notes": ["未来数值或规则表达式只能关联机制，不替换语义定义。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/mechanics", "id_field": "skill_mechanic_id"}],
+      "migrations": []
+    },
+    {
+      "name": "skill_characteristic",
+      "namespace": "skill",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:skill:skill_characteristic:0.1.0"}],
+      "allowed_entity_types": ["skill"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "技能表现特征组件", "description_zh": "保存 Skill 稳定风格、感官特征、倾向和辨识差异。", "usage_notes": ["不负责计算某次施展的结果。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "skill_requirement",
+      "namespace": "skill",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:skill:skill_requirement:0.1.0"}],
+      "allowed_entity_types": ["skill"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/requirements/*/skill_requirement_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "技能条件组件", "description_zh": "保存无法仅靠 Entity 引用表达的学习和使用条件。", "usage_notes": ["可直接引用的条件应使用 Reference，避免重复名称。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/requirements", "id_field": "skill_requirement_id"}],
+      "migrations": []
+    },
+    {
+      "name": "skill_progression",
+      "namespace": "skill",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:skill:skill_progression:0.1.0"}],
+      "allowed_entity_types": ["skill"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [
+        {"path": "/data/stage_evaluation/numeric_bindings/*/numeric_binding_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]},
+        {"path": "/data/stages/*/skill_stage_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]},
+        {"path": "/data/stages/*/context_blocks/*/stage_context_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}
+      ]},
+      "ai": {"title_zh": "技能进阶组件", "description_zh": "保存公共阶段、MUV 映射和按用途召回内容，不保存角色当前值。", "usage_notes": ["普通回合只加载当前阶段和相关 Context Block。", "numeric_derived 以 Host MUV 为权威；hybrid 仍需语义确认。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [
+        {"array_path": "/data/stage_evaluation/numeric_bindings", "id_field": "numeric_binding_id"},
+        {"array_path": "/data/stages", "id_field": "skill_stage_id"}
+      ],
+      "migrations": []
+    },
+    {
+      "name": "concept_definition",
+      "namespace": "concept",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:concept:concept_definition:0.1.0"}],
+      "allowed_entity_types": ["concept"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "概念定义组件", "description_zh": "保存 Concept 分类、完整定义、认识地位与系统用途。", "usage_notes": ["分类字段帮助筛选，不能替代自然语言定义。", "disputed 或 attributed_theory 不得被当成无条件客观规律。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "concept_rule",
+      "namespace": "concept",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:concept:concept_rule:0.1.0"}],
+      "allowed_entity_types": ["concept"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/rules/*/concept_rule_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "概念规则组件", "description_zh": "保存可独立定位的规则、适用条件和可能后果。", "usage_notes": ["规则提供判断依据，不直接写数据库或保证结果发生。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [{"array_path": "/data/rules", "id_field": "concept_rule_id"}],
+      "migrations": []
+    },
+    {
+      "name": "stage_framework",
+      "namespace": "concept",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:concept:stage_framework:0.1.0"}],
+      "allowed_entity_types": ["concept"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [
+        {"path": "/data/stage_evaluation/numeric_bindings/*/numeric_binding_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]},
+        {"path": "/data/stages/*/stage_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]},
+        {"path": "/data/stages/*/context_blocks/*/stage_context_id", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}
+      ]},
+      "ai": {"title_zh": "共享阶段体系组件", "description_zh": "保存阶段定义、MUV 映射和按用途召回内容，不保存任何 Host 当前值。", "usage_notes": ["普通回合只注入当前阶段。", "MUV 缺失或映射失效时不得回退为加载全部阶段。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [],
+      "item_identity_rules": [
+        {"array_path": "/data/stage_evaluation/numeric_bindings", "id_field": "numeric_binding_id"},
+        {"array_path": "/data/stages", "id_field": "stage_id"}
+      ],
+      "migrations": []
+    },
+    {
+      "name": "applicability",
+      "namespace": "concept",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:concept:applicability:0.1.0"}],
+      "allowed_entity_types": ["concept"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": []},
+      "ai": {"title_zh": "概念适用边界组件", "description_zh": "保存适用、排除、例外和前提条件。", "usage_notes": ["具体长期对象范围应使用 Reference；本组件不复制目标名称。"]},
+      "correction": {"key_aliases": [], "value_aliases": []}, "references": [], "migrations": []
+    },
+    {
+      "name": "related_concept_reference",
+      "namespace": "core",
+      "category": "reference",
+      "current_version": "0.1.0",
+      "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:core:related_concept_reference:0.1.0"}],
+      "allowed_entity_types": ["location", "item", "organization", "skill", "concept"],
+      "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/concept_refs/*/concept_ref/type", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "相关概念引用组件", "description_zh": "保存 World Entity 长期引用的 Concept 及宿主语境角色。", "usage_notes": ["只在概念长期适用于宿主时保存；一次 Event 中的临时涉及不自动建立长期引用。"]},
+      "correction": {"key_aliases": [], "value_aliases": []},
+      "references": [{"path": "/data/concept_refs/*/concept_ref", "target_types": ["concept"], "cardinality": "many", "authority_direction": "host_to_target"}],
       "migrations": []
     },
     {

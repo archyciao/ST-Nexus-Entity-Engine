@@ -35,16 +35,20 @@ for import_path in (TOOLS, SRC):
         sys.path.insert(0, str(import_path))
 
 from event_segmentation_probe import (  # noqa: E402
+    ChatCompletionTransportError,
+    anchor_span,
     apply_boundary_plan,
     apply_content_plan,
     batch_messages,
     bounded_segments_for_content,
     call_chat_completion,
+    chat_completion_request_body,
     evaluate_state_against_gold,
     extract_json_object,
     initial_state,
     iter_rounds,
     load_gold_fixture,
+    normalize_anchor,
     normalize_boundary_plan,
     quote_in_text,
     state_view_for_boundary,
@@ -80,27 +84,23 @@ LOCATION_ROLES = {"primary", "start", "transit", "end"}
 INVENTORY_ROLES = {"carried", "equipped", "worn"}
 VISIBILITIES = {"public", "private", "secret"}
 SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+EVENT_MERGE_REASON_CODES = {
+    "same_unfinished_activity",
+    "direct_aftermath",
+}
 
 
 EVENT_ATTENTION_GUIDE = """
-输出前静默完成以下交叉检查，不要写出检查过程：
-1. 为可能的每段在内部写一张“局部事件卡”：主要发起者—正在推进的直接行动、互动及对象—
-   已经得到的结果或当前落点。采用可单独回忆的局部经历层级；长期目标和宏观阶段可以跨越
-   多张事件卡。
-2. 逐处比较相邻内容。当左侧行动或互动已经形成可陈述的结果、决定或阶段落点，右侧又以
-   新的发起动作开启，并明显转向另一直接目的、主要互动对象、处理对象或因果问题时，把右侧
-   开头作为候选边界。若右侧只是左侧结果的直接反应、收尾或同一行动的下一步，继续原段。
-3. 检查“中断后恢复”：短暂问答、插话或局部动作若嵌在仍持续的主要活动中，随后又回到该
-   活动，通常留在同段；若原活动已经落地，后来者、任务或行动另有展开和结果，再考虑新段。
-4. 校正两个方向：同一人物、地点、时间、长期目标或前后因果联系，本身不要求合并；换说话
-   人、单个动作、连续问答或短暂转场，本身也不形成边界。若一个标题需要用“并、随后、又、
-   以及”等串联两个各有进展或结果的局部事件卡，检查是否过粗；若相邻标题只是同一行动的
-   步骤、问答往返或直接余波，检查是否过碎。
-5. 粒度参照：技术员检查故障、换件、重启并确认设备恢复，是一段维修经历；设备恢复后，
-   快递员到场递交一份需当事人另行处理的文件，通常开始下一段。编辑写稿时简短回答同事的
-   问题后继续写稿，可以留在原段；交稿完成后开始接受采访，通常转入下一段。
-6. 最后按来源清点本批有实际作用的人物、行动、互动、因果、物品、结果和未决事项，确保均
-   归入相应事实段且没有同义重复。一批可以没有新边界，也可以有多个边界，不为数量调整结果。
+脚本已把相邻完整回合之间的候选交界默认保留。后一块仍在完成前块尚未结束的同一现场行动，
+或主要补全其直接结果时，可把对应 candidate_id 写入 boundary_merges；前块已有结果，或转场后
+开始新的行动、互动或因果问题时，保留交界。长期目标、人物相同或因果连续可作背景，不单独
+决定合并。merge_policy 为 defer_until_later_context 的交界本批保留，不列入 boundary_merges；
+它不是永久边界，后续上下文证明仍属同一 Event 时可由待定窗口重组。
+
+若新 Event 明确从同一消息内部开始，用 additional_starts 定位；其余分段、slot 编号和原文范围
+由脚本生成。event_updates 使用脚本输入中的 block_id，延续旧生成中时使用
+existing_forming_tail，消息内新增起点使用对应 start_id。返回各 Event 的完整 title、description
+和本批事实增量，覆盖有实际作用的人物、行动、因果、物品、结果与未决事项。直接输出 JSON。
 """.strip()
 
 
@@ -110,8 +110,9 @@ EVENT_SYSTEM_PROMPT = f"""
 粒度：一个长期目标或宏观阶段可以包含若干 Event；每项 Event 可以包含形成同一局部结果
 所需的起因、过程、结果和直接余波。
 
-相关 Entity 和脚本预检清单只用于身份消歧、来源核对和防漏，不能覆盖或补写原文。
-不要展示分析过程。
+相关 Entity、source_blocks、boundary_candidates 和脚本预检清单只用于缩小判断范围、
+身份消歧、来源核对和防漏，不能覆盖或补写原文。脚本先保留候选交界；模型只撤销符合
+合并条件的交界，正式分段、slot 编号和原文裁切由脚本完成。不要展示分析过程。
 
 普通边界只能出现在本批新增消息中，不能回到已处理旧消息内部重新切分。同一消息
 先收尾旧 Event、再开始新 Event 时，用新 Event 的原文开头定位。结果后的直接余波
@@ -137,18 +138,17 @@ Event 不再枚举参与者、地点和相关 Entity；这些对象由独立 Ent
 只输出一个 JSON 对象，不输出解释或分析：
 {{
   "old_forming_disposition": "absent | keep_distinct | merge_into_pending",
-  "decision_reason": "一句边界理由；没有新边界时也说明为什么保持连续",
-  "boundary_uncertainties": ["仅列确实含混之处"],
-  "segments": [{{
-    "slot": "pending_tail | forming_existing | new_1 | new_2 ...",
-    "source_refs": ["本批消息引用"],
-    "start_anchors": [{{
-      "source_ref": "本段开头所在消息",
-      "start_quote": "该消息中的开头原文短引"
-    }}]
+  "boundary_merges": [{{
+    "candidate_id": "脚本给出的候选交界编号",
+    "reason_code": "same_unfinished_activity | direct_aftermath"
+  }}],
+  "additional_starts": [{{
+    "start_id": "inside_1 | inside_2 ...",
+    "source_ref": "新 Event 开头所在消息",
+    "start_quote": "该消息中的开头原文短引"
   }}],
   "event_updates": [{{
-    "slot": "与 segments 中受影响 slot 相同",
+    "partition_key": "existing_forming_tail | round_0001 | inside_1 ...",
     "title": "简短标题",
     "description": "完整检索说明",
     "event_beats_add": [{{
@@ -172,8 +172,11 @@ Event 不再枚举参与者、地点和相关 Entity；这些对象由独立 Ent
 }}
 
 event_time 没有叙事依据时填 null；形成中的 Event 没有结束时间时省略 end_time。
-每条新增消息至少归属一个 segment；同一消息内切分时相邻 segment 可共同引用该消息，
-但后一段必须用 start_anchors 定位。每个 slot 只出现一次。
+boundary_merges 只列需要撤销的候选交界；保留的候选无需重发。additional_starts 没有内容时
+返回空数组。merge_policy 为 defer_until_later_context 的候选本批不可撤销。每个脚本生成的
+partition_key 在 event_updates 中出现一次；撤销交界后，合并组只用最左侧 partition_key
+返回一项覆盖整个合并组的更新。event_updates 只列最终分段中获得本批来源的 partition_key；
+若首个候选交界保留，不要为 existing_forming_tail 返回空更新。
 """.strip()
 
 
@@ -224,8 +227,10 @@ Location，其他 Type 省略。Entity description 使用一句紧凑说明，�
 客观关系事实放入 aspects；某一方当前如何看待或对待另一方放入 directional_states。
 师徒、敌对、亲属等不对称角色分别写在 participant_roles 中。所有 kind、roles、tags
 使用简短 snake_case 英文标记。Character 的长期资料与当前状态要区分；只有叙事足以
-支持时才填写 character_data_patch。它只含本批确认发生变化的字段；内部对象可以只写
-改变项，某个数组一旦出现则表示该数组的当前完整值。缺证据的字段省略，不猜测。
+支持时才填写 character_data_patch。其他五类只在相应稳定资料或当前状态确有变化时填写
+domain_data_patch。两者都是稀疏补丁；带 state_key、entry_key、objective_key、stage_key、
+binding_key 或 context_key 的条目按语义键增量合并，未变化旧项不必重发。局部 ID、正式
+引用、反向索引和阶段数值映射由脚本处理，模型不要编造 ID。
 
 只输出 JSON，不解释：
 {
@@ -249,8 +254,20 @@ Location，其他 Type 省略。Entity description 使用一句紧凑说明，�
       "preferences": [{"attitude": "like | dislike", "subject": "", "description": "", "related_entity_key": ""}],
       "objectives": [{"description": "", "horizon": "short_term | medium_term", "related_entity_keys": []}],
       "inventory": [{"item_key": "item:主要名称", "roles": ["carried | equipped | worn"]}],
-      "skills": [{"skill_key": "skill:主要名称", "proficiency_description": ""}],
+      "skills": [{"skill_key": "skill:主要名称", "proficiency_description": "", "stage_state": {"framework_key": "skill/concept:阶段框架", "evaluation_mode": "semantic | numeric_derived | hybrid", "current_stage_key": "可选阶段候选键", "muv_values": [{"binding_key": "变量绑定候选键", "value": 0}]}}],
       "current_location_key": "location:主要名称"
+    },
+    "domain_data_patch": {
+      "profile": "Location、Item 或 Organization 的稳定 Profile 对象",
+      "definition": "Skill 或 Concept 的稳定 Definition 对象",
+      "states": [{"state_key": "稳定语义键", "kind": "snake_case", "description": "当前有效状态", "status": "active | inactive"}],
+      "parent_key": "Location 或 Organization 的直接父级候选键",
+      "placement": {"target_key": "character/item/location:目标", "role": "carried | equipped | worn | contained | placed | stored", "detail": "相对目标的当前放置细节，可选"},
+      "mechanics": [{"entry_key": "稳定语义键", "kind": "snake_case", "description": "Skill 机制"}],
+      "rules": [{"rule_key": "稳定语义键", "kind": "snake_case", "statement": "Concept 规则"}],
+      "progression": "Skill 阶段定义；条目使用 stage_key、binding_key、context_key",
+      "stage_framework": "Concept 阶段定义；MUV 当前值不得写入 Skill 或 Concept",
+      "related_concepts": [{"concept_key": "concept:名称", "roles": ["snake_case"]}]
     }
   }],
   "relations": [{
@@ -276,7 +293,9 @@ Location，其他 Type 省略。Entity description 使用一句紧凑说明，�
   }]
 }
 
-非 Character 省略 character_data_patch。新出场但暂时没有姓名的对象，可用稳定、可区分的
+Character 省略 domain_data_patch，非 Character 省略 character_data_patch。Character
+中的 inventory 只是 Item 放置候选，脚本会写到 Item.current_placement_reference，再反向
+重建 Character.inventory_index；它不是第二份物品栏权威。新出场但暂时没有姓名的对象，可用稳定、可区分的
 叙事称呼作主要名称；以后由实体匹配流程合并，不能因此漏掉其行动或物品。可选字段没有内容
 时直接省略，不要输出整套空白结构。
 """.strip()
@@ -356,8 +375,8 @@ def _ensure_event_beats(state: dict[str, Any]) -> None:
 
 def _beat_signature(beat: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
     return (
-        str(beat.get("content", "")).strip(),
-        tuple(str(ref) for ref in _as_list(beat.get("source_refs"))),
+        normalize_anchor(str(beat.get("content", "")).strip()),
+        tuple(sorted({str(ref) for ref in _as_list(beat.get("source_refs"))})),
     )
 
 
@@ -486,6 +505,391 @@ def related_entity_context(
 SCENE_HEADER_RE = re.compile(r"^\[(?:场景时间|时间)[^\n\]]*\]", re.MULTILINE)
 
 
+def _scene_place(header: str) -> str:
+    """从酒馆场景头中提取地点部分；识别不了时不猜。"""
+
+    inner = str(header).strip().removeprefix("[").removesuffix("]")
+    _, separator, value = inner.partition("：")
+    if not separator:
+        return ""
+    parts = [part.strip() for part in value.split("·") if part.strip()]
+    place_parts: list[str] = []
+    found_time_boundary = False
+    for part in parts:
+        if re.search(r"(?:^|\D)\d{1,4}年", part) or re.match(
+            r"^(?:天元|公元|纪元)\s*\d+", part
+        ):
+            found_time_boundary = True
+            break
+        place_parts.append(part)
+    return "·".join(place_parts) if found_time_boundary else ""
+
+
+def _short_opening(text: str, limit: int = 48) -> str:
+    """生成只用于定位的紧凑开头，不替代正文。"""
+
+    return re.sub(r"\s+", " ", str(text).strip())[:limit]
+
+
+def _short_closing(text: str, limit: int = 72) -> str:
+    """生成候选交界左侧的紧凑结尾。"""
+
+    return re.sub(r"\s+", " ", str(text).strip())[-limit:]
+
+
+def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按完整回合生成粗块，让模型只在少量交界处做语义判断。"""
+
+    blocks: list[dict[str, Any]] = []
+    for round_item in rounds:
+        messages = batch_messages([round_item])
+        scene_headers = [
+            match.group(0)
+            for message in messages
+            for match in SCENE_HEADER_RE.finditer(str(message.get("content", "")))
+        ]
+        scene_places = _unique(
+            place for header in scene_headers if (place := _scene_place(header))
+        )
+        opening_message = next(
+            (
+                message
+                for message in messages
+                if str(message.get("content", "")).strip()
+            ),
+            None,
+        )
+        closing_message = next(
+            (
+                message
+                for message in reversed(messages)
+                if str(message.get("content", "")).strip()
+            ),
+            None,
+        )
+        blocks.append(
+            {
+                "block_id": f"round_{int(round_item['round']):04d}",
+                "round": int(round_item["round"]),
+                "source_refs": [str(message["ref"]) for message in messages],
+                "opening": (
+                    {
+                        "source_ref": str(opening_message["ref"]),
+                        "quote": _short_opening(opening_message["content"]),
+                    }
+                    if opening_message is not None
+                    else None
+                ),
+                "closing": (
+                    {
+                        "source_ref": str(closing_message["ref"]),
+                        "quote": _short_closing(closing_message["content"]),
+                    }
+                    if closing_message is not None
+                    else None
+                ),
+                "scene_places": scene_places,
+            }
+        )
+    return blocks
+
+
+def event_boundary_candidates(
+    state: dict[str, Any], source_blocks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """列出默认保留的回合交界；模型只需指出哪些交界应合并。"""
+
+    candidates: list[dict[str, Any]] = []
+    has_forming = any(
+        event.get("status") == "forming" for event in state.get("events", [])
+    )
+    for index, block in enumerate(source_blocks):
+        if index == 0:
+            if has_forming:
+                candidates.append(
+                    {
+                        "candidate_id": f"before_{block['block_id']}",
+                        "left": "existing_forming_tail",
+                        "right": block["block_id"],
+                        "default_action": "keep_boundary",
+                        "merge_policy": "current_batch",
+                        "script_clues": [],
+                    }
+                )
+            continue
+
+        previous = source_blocks[index - 1]
+        previous_places = _as_list(previous.get("scene_places"))
+        current_places = _as_list(block.get("scene_places"))
+        clues: list[dict[str, Any]] = []
+        if previous_places and current_places and previous_places[-1] != current_places[0]:
+            clues.append(
+                {
+                    "kind": "scene_place_change",
+                    "from": previous_places[-1],
+                    "to": current_places[0],
+                }
+            )
+        candidates.append(
+            {
+                "candidate_id": f"before_{block['block_id']}",
+                "left": previous["block_id"],
+                "right": block["block_id"],
+                "default_action": "keep_boundary",
+                "merge_policy": (
+                    "defer_until_later_context" if clues else "current_batch"
+                ),
+                "script_clues": clues,
+            }
+        )
+    return candidates
+
+
+def _boundary_merge_ids(plan: dict[str, Any]) -> list[str]:
+    """兼容对象或字符串形式，读取模型要求撤销的候选交界。"""
+
+    result: list[str] = []
+    for item in _as_list(plan.get("boundary_merges")):
+        candidate_id = (
+            str(item.get("candidate_id", "")).strip()
+            if isinstance(item, dict)
+            else str(item).strip()
+        )
+        if candidate_id and candidate_id not in result:
+            result.append(candidate_id)
+    return result
+
+
+def _block_partition_map(
+    segments: list[dict[str, Any]],
+    source_blocks: list[dict[str, Any]],
+    additional_starts: list[Any],
+) -> dict[str, str]:
+    """只在整回合唯一落入一个最终分段时建立旧块到新分区的别名。"""
+
+    additional_refs = {
+        str(item.get("source_ref", ""))
+        for item in additional_starts
+        if isinstance(item, dict)
+    }
+    result: dict[str, str] = {}
+    for block in source_blocks:
+        if not isinstance(block, dict):
+            continue
+        block_id = str(block.get("block_id", ""))
+        block_refs = {str(ref) for ref in _as_list(block.get("source_refs"))}
+        if not block_id or not block_refs or block_refs & additional_refs:
+            continue
+        matching_keys = _unique(
+            str(segment.get("partition_key", ""))
+            for segment in segments
+            if isinstance(segment, dict)
+            and block_refs.issubset(
+                {str(ref) for ref in _as_list(segment.get("source_refs"))}
+            )
+        )
+        if len(matching_keys) == 1 and matching_keys[0]:
+            result[block_id] = matching_keys[0]
+    return result
+
+
+def derive_event_segments(
+    plan: dict[str, Any], state: dict[str, Any], rounds: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """从默认分开的回合块和少量撤销项确定性生成 Event 分段。
+
+    原始消息始终不改写；同一组输入和合并编号会得到同一分段。保存这里返回的
+    ``partition`` 后，可以换用旧合并编号重新生成，从而支持最近未定稿窗口回退。
+    """
+
+    source_blocks = event_source_blocks(rounds)
+    candidates = event_boundary_candidates(state, source_blocks)
+    candidate_ids = [str(item["candidate_id"]) for item in candidates]
+    deferred_ids = [
+        str(item["candidate_id"])
+        for item in candidates
+        if item.get("merge_policy") == "defer_until_later_context"
+    ]
+    requested_merge_ids = _boundary_merge_ids(plan)
+    deferred_merge_ids = [
+        value for value in requested_merge_ids if value in deferred_ids
+    ]
+    merged_ids = [
+        value
+        for value in requested_merge_ids
+        if value in candidate_ids and value not in deferred_ids
+    ]
+    warnings = [
+        f"未知候选交界 {value} 已忽略；默认保留该处边界"
+        for value in requested_merge_ids
+        if value not in candidate_ids
+    ]
+    warnings.extend(
+        f"{value} 本批需保留到后续上下文，模型的合并请求已暂缓"
+        for value in deferred_merge_ids
+    )
+
+    has_forming = any(
+        event.get("status") == "forming" for event in state.get("events", [])
+    )
+    groups: list[dict[str, Any]] = []
+    for index, block in enumerate(source_blocks):
+        candidate_id = f"before_{block['block_id']}"
+        merge_with_left = candidate_id in merged_ids
+        if index == 0:
+            groups.append(
+                {
+                    "continues_old": has_forming and merge_with_left,
+                    "blocks": [block],
+                }
+            )
+        elif merge_with_left:
+            groups[-1]["blocks"].append(block)
+        else:
+            groups.append({"continues_old": False, "blocks": [block]})
+
+    messages = batch_messages(rounds)
+    message_map = {str(message["ref"]): str(message["content"]) for message in messages}
+    message_order = {str(message["ref"]): index for index, message in enumerate(messages)}
+    additional: list[dict[str, Any]] = []
+    used_start_ids: set[str] = set()
+    for raw_start in _as_list(plan.get("additional_starts")):
+        if not isinstance(raw_start, dict):
+            warnings.append("一项 additional_starts 不是对象，已忽略")
+            continue
+        start_id = str(raw_start.get("start_id", "")).strip()
+        source_ref = str(raw_start.get("source_ref", "")).strip()
+        quote = str(raw_start.get("start_quote", "")).strip()
+        span = anchor_span(message_map.get(source_ref, ""), quote)
+        if not start_id or start_id in used_start_ids:
+            warnings.append("一项 additional_starts 缺少唯一 start_id，已忽略")
+            continue
+        if source_ref not in message_map or not quote or span is None:
+            warnings.append(f"{start_id} 的消息内起点无法核对，已忽略")
+            continue
+        used_start_ids.add(start_id)
+        additional.append(
+            {
+                "start_id": start_id,
+                "source_ref": source_ref,
+                "start_quote": quote,
+                "message_order": message_order[source_ref],
+                "character_offset": span[0],
+            }
+        )
+
+    chunks: list[dict[str, Any]] = []
+    applied_start_ids: list[str] = []
+    for group in groups:
+        blocks = _as_list(group.get("blocks"))
+        refs = _unique(
+            str(ref)
+            for block in blocks
+            if isinstance(block, dict)
+            for ref in _as_list(block.get("source_refs"))
+        )
+        if not blocks or not refs:
+            continue
+        first_block = blocks[0]
+        first_opening = first_block.get("opening") or {}
+        base_anchor = {
+            "source_ref": str(first_opening.get("source_ref", refs[0])),
+            "start_quote": str(first_opening.get("quote", ""))
+            or _short_opening(message_map.get(refs[0], ""), 32),
+        }
+        base_key = (
+            "existing_forming_tail"
+            if group.get("continues_old")
+            else str(first_block.get("block_id", ""))
+        )
+        local_positions = {ref: index for index, ref in enumerate(refs)}
+        starts = sorted(
+            (
+                item
+                for item in additional
+                if str(item.get("source_ref", "")) in local_positions
+            ),
+            key=lambda item: (
+                local_positions[str(item["source_ref"])],
+                int(item["character_offset"]),
+            ),
+        )
+
+        current_ref_index = 0
+        current_offset = 0
+        current_anchor = base_anchor
+        current_key = base_key
+        current_continues_old = bool(group.get("continues_old"))
+        for item in starts:
+            boundary_ref = str(item["source_ref"])
+            boundary_ref_index = local_positions[boundary_ref]
+            boundary_offset = int(item["character_offset"])
+            if boundary_ref_index < current_ref_index or (
+                boundary_ref_index == current_ref_index
+                and boundary_offset <= current_offset
+            ):
+                warnings.append(
+                    f"{item['start_id']} 与已有分段起点重合，已忽略"
+                )
+                continue
+            chunks.append(
+                {
+                    "partition_key": current_key,
+                    "continues_old": current_continues_old,
+                    "source_refs": refs[current_ref_index : boundary_ref_index + 1],
+                    "start_anchors": [deepcopy(current_anchor)],
+                }
+            )
+            current_ref_index = boundary_ref_index
+            current_offset = boundary_offset
+            current_anchor = {
+                "source_ref": boundary_ref,
+                "start_quote": str(item["start_quote"]),
+            }
+            current_key = str(item["start_id"])
+            current_continues_old = False
+            applied_start_ids.append(current_key)
+        chunks.append(
+            {
+                "partition_key": current_key,
+                "continues_old": current_continues_old,
+                "source_refs": refs[current_ref_index:],
+                "start_anchors": [deepcopy(current_anchor)],
+            }
+        )
+
+    disposition = str(plan.get("old_forming_disposition", ""))
+    old_slot = {
+        "keep_distinct": "forming_existing",
+        "merge_into_pending": "pending_tail",
+    }.get(disposition)
+    new_number = 0
+    segments: list[dict[str, Any]] = []
+    for chunk in chunks:
+        if chunk.pop("continues_old", False) and old_slot:
+            slot = old_slot
+        else:
+            new_number += 1
+            slot = f"new_{new_number}"
+        chunk["slot"] = slot
+        segments.append(chunk)
+
+    partition = {
+        "version": 1,
+        "mode": "default_split_then_merge",
+        "candidate_ids": candidate_ids,
+        "merged_boundary_ids": merged_ids,
+        "deferred_merge_ids": deferred_merge_ids,
+        "additional_start_ids": applied_start_ids,
+        "partition_keys": [str(segment["partition_key"]) for segment in segments],
+        "block_partition_map": _block_partition_map(
+            segments, source_blocks, _as_list(plan.get("additional_starts"))
+        ),
+        "warnings": warnings,
+    }
+    return segments, partition
+
+
 def source_inventory(
     state: dict[str, Any], rounds: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -552,9 +956,18 @@ def build_event_prompt(
             preview["related_entity_keys"] = deepcopy(
                 event.get("related_entity_keys", [])
             )
+    source_blocks = event_source_blocks(rounds)
     payload = {
         "batch_number": batch_number,
         "source_inventory": source_inventory(state, rounds),
+        "source_blocks": {
+            "nature": "脚本按完整回合生成的可回退候选块；默认分别保留，模型只决定撤销哪些相邻交界",
+            "items": source_blocks,
+        },
+        "boundary_candidates": {
+            "nature": "默认 keep_boundary；只有 current_batch 候选可因同一未完现场行动或直接结果补全列入 boundary_merges",
+            "items": event_boundary_candidates(state, source_blocks),
+        },
         "existing_event_tail": tail,
         "related_entities": related_entity_context(state, rounds),
         "new_messages": batch_messages(rounds),
@@ -675,14 +1088,32 @@ def normalize_event_plan(
 ) -> dict[str, Any]:
     """由后一 Event 的开头派生前一段结束线，模型无需重复输出边界。"""
 
+    normalized = deepcopy(plan)
+    raw_segments = normalized.get("segments")
+    if not isinstance(raw_segments, list) or not raw_segments:
+        derived_segments, partition = derive_event_segments(normalized, state, rounds)
+        normalized["segments"] = derived_segments
+        normalized["script_partition"] = partition
+        normalized.setdefault(
+            "decision_reason",
+            "模型撤销 "
+            + str(len(partition["merged_boundary_ids"]))
+            + " 处候选交界；其余交界由脚本按默认分段保留",
+        )
+        normalized["decision_reason_source"] = "script_partition"
+    normalized.setdefault("boundary_merges", [])
+    normalized.setdefault("additional_starts", [])
+    normalized.setdefault("boundary_uncertainties", [])
+
     boundary_source = {
-        "old_forming_disposition": plan.get("old_forming_disposition"),
-        "decision_reason": plan.get("decision_reason"),
-        "segments": deepcopy(plan.get("segments")),
+        "old_forming_disposition": normalized.get("old_forming_disposition"),
+        "decision_reason": normalized.get("decision_reason"),
+        "segments": deepcopy(normalized.get("segments")),
     }
     messages = {message["ref"]: message["content"] for message in batch_messages(rounds)}
     script_repairs: list[dict[str, str]] = []
-    for segment in _as_list(boundary_source.get("segments")):
+    segments = _as_list(boundary_source.get("segments"))
+    for segment_index, segment in enumerate(segments):
         if not isinstance(segment, dict):
             continue
         source_refs = [str(ref) for ref in _as_list(segment.get("source_refs"))]
@@ -697,25 +1128,41 @@ def normalize_event_plan(
             if anchors and isinstance(anchors[0], dict)
             else ""
         )
-        if (
-            segment.get("slot") in {"forming_existing", "pending_tail"}
-            and source_refs
-            and source_refs[0] in messages
-            and first_anchor_ref != source_refs[0]
-        ):
+        previous_refs = (
+            {
+                str(ref)
+                for ref in _as_list(segments[segment_index - 1].get("source_refs"))
+            }
+            if segment_index > 0 and isinstance(segments[segment_index - 1], dict)
+            else set()
+        )
+        deterministic_opening = bool(source_refs) and (
+            segment_index == 0 or source_refs[0] not in previous_refs
+        )
+        if deterministic_opening and source_refs[0] in messages:
             opening = messages[source_refs[0]].strip()[:32]
             if opening:
+                remaining_anchors = [
+                    deepcopy(anchor)
+                    for anchor in anchors
+                    if isinstance(anchor, dict)
+                    and str(anchor.get("source_ref", "")) != source_refs[0]
+                ]
                 segment["start_anchors"] = [
-                    {"source_ref": source_refs[0], "start_quote": opening}
+                    {"source_ref": source_refs[0], "start_quote": opening},
+                    *remaining_anchors,
                 ]
                 anchors = segment["start_anchors"]
-                script_repairs.append(
-                    {
-                        "source_ref": source_refs[0],
-                        "model_quote": original_anchor_quote,
-                        "source_quote": opening,
-                    }
-                )
+                if first_anchor_ref != source_refs[0] or not quote_in_text(
+                    original_anchor_quote, opening
+                ):
+                    script_repairs.append(
+                        {
+                            "source_ref": source_refs[0],
+                            "model_quote": original_anchor_quote,
+                            "source_quote": opening,
+                        }
+                    )
         for anchor in _as_list(segment.get("start_anchors")):
             if not isinstance(anchor, dict):
                 continue
@@ -723,6 +1170,22 @@ def normalize_event_plan(
             quote = str(anchor.get("start_quote", "")).strip()
             text = messages.get(source_ref, "")
             if not quote or not text or quote_in_text(quote, text):
+                continue
+            exact_refs = [
+                ref
+                for ref in source_refs
+                if ref in messages and quote_in_text(quote, messages[ref])
+            ]
+            if len(exact_refs) == 1:
+                repaired_ref = exact_refs[0]
+                anchor["source_ref"] = repaired_ref
+                script_repairs.append(
+                    {
+                        "source_ref": repaired_ref,
+                        "model_quote": quote,
+                        "source_quote": quote,
+                    }
+                )
                 continue
             repaired = _nearest_source_quote(text, quote)
             if repaired is None:
@@ -736,9 +1199,7 @@ def normalize_event_plan(
                 }
             )
     boundary = normalize_boundary_plan(boundary_source, state, rounds)
-    normalized = deepcopy(plan)
     normalized.setdefault("decision_reason", "")
-    normalized.setdefault("boundary_uncertainties", [])
     for update in _as_list(normalized.get("event_updates")):
         if not isinstance(update, dict):
             continue
@@ -762,7 +1223,346 @@ def normalize_event_plan(
     normalized["segments"] = boundary.get("segments", [])
     normalized["boundaries"] = boundary.get("boundaries", [])
     normalized["script_anchor_repairs"] = script_repairs
+    source_blocks = event_source_blocks(rounds)
+    normalized["script_boundary_candidates"] = event_boundary_candidates(
+        state, source_blocks
+    )
+    partition = normalized.get("script_partition")
+    if isinstance(partition, dict):
+        partition["block_partition_map"] = _block_partition_map(
+            [
+                segment
+                for segment in _as_list(normalized.get("segments"))
+                if isinstance(segment, dict)
+            ],
+            source_blocks,
+            _as_list(normalized.get("additional_starts")),
+        )
+    _coalesce_event_updates_by_partition(normalized)
+    _drop_unassigned_noop_event_updates(normalized)
+    _assign_event_update_slots_from_partition(normalized)
+    _repair_unique_event_update_slot(normalized)
+    _reassign_event_beats_by_source(normalized)
+    _canonicalize_key_details(normalized, rounds)
     return normalized
+
+
+def _merge_complete_text(left: Any, right: Any, separator: str) -> str:
+    """在脚本归并模型重复更新时保全两侧文字，不重新概括语义。"""
+
+    left_text = str(left or "").strip()
+    right_text = str(right or "").strip()
+    if not left_text:
+        return right_text
+    if not right_text or right_text in left_text:
+        return left_text
+    if left_text in right_text:
+        return right_text
+    return left_text.rstrip("。；、/／") + separator + right_text
+
+
+def _coalesce_event_updates_by_partition(plan: dict[str, Any]) -> None:
+    """把已被边界合并的回合更新确定性归入最终分区。"""
+
+    partition = plan.get("script_partition")
+    block_map = (
+        partition.get("block_partition_map", {})
+        if isinstance(partition, dict)
+        else {}
+    )
+    if not isinstance(block_map, dict) or not block_map:
+        plan["script_update_coalesces"] = []
+        return
+
+    canonical_updates: dict[str, dict[str, Any]] = {}
+    output: list[Any] = []
+    coalesces: list[dict[str, str]] = []
+    array_fields = (
+        "event_beats_add",
+        "unresolved_add",
+        "unresolved_resolve",
+        "retire_detail_ids",
+        "new_key_details",
+    )
+    for raw_update in _as_list(plan.get("event_updates")):
+        if not isinstance(raw_update, dict):
+            output.append(raw_update)
+            continue
+        update = deepcopy(raw_update)
+        original_key = str(update.get("partition_key", "")).strip()
+        canonical_key = str(block_map.get(original_key, original_key)).strip()
+        update["partition_key"] = canonical_key
+        update.pop("slot", None)
+        target = canonical_updates.get(canonical_key)
+        if target is None or not canonical_key:
+            output.append(update)
+            if canonical_key:
+                canonical_updates[canonical_key] = update
+            continue
+
+        target["title"] = _merge_complete_text(
+            target.get("title"), update.get("title"), "／"
+        )
+        target["description"] = _merge_complete_text(
+            target.get("description"), update.get("description"), "；"
+        )
+        for field in array_fields:
+            target[field] = _unique(
+                [*_as_list(target.get(field)), *_as_list(update.get(field))]
+            )
+        target_time = target.get("event_time")
+        incoming_time = update.get("event_time")
+        if not isinstance(target_time, dict) and isinstance(incoming_time, dict):
+            target["event_time"] = deepcopy(incoming_time)
+        elif isinstance(target_time, dict) and isinstance(incoming_time, dict):
+            if not isinstance(target_time.get("start_time"), dict) and isinstance(
+                incoming_time.get("start_time"), dict
+            ):
+                target_time["start_time"] = deepcopy(incoming_time["start_time"])
+            if isinstance(incoming_time.get("end_time"), dict):
+                target_time["end_time"] = deepcopy(incoming_time["end_time"])
+        coalesces.append(
+            {
+                "from_partition_key": original_key,
+                "to_partition_key": canonical_key,
+            }
+        )
+    plan["event_updates"] = output
+    plan["script_update_coalesces"] = coalesces
+
+
+def _drop_unassigned_noop_event_updates(plan: dict[str, Any]) -> None:
+    """删除没有本批事实、也不属于最终分段的模型空更新。"""
+
+    partition_keys = {
+        str(segment.get("partition_key", "")).strip()
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict) and str(segment.get("partition_key", "")).strip()
+    }
+    delta_fields = (
+        "event_beats_add",
+        "unresolved_add",
+        "unresolved_resolve",
+        "retire_detail_ids",
+        "new_key_details",
+    )
+    retained: list[Any] = []
+    drops: list[dict[str, str]] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            retained.append(update)
+            continue
+        partition_key = str(update.get("partition_key", "")).strip()
+        has_source_backed_delta = any(
+            bool(_as_list(update.get(field))) for field in delta_fields
+        )
+        if partition_key and partition_key not in partition_keys and not has_source_backed_delta:
+            drops.append(
+                {
+                    "partition_key": partition_key,
+                    "reason": "not_in_final_partition_and_no_batch_delta",
+                }
+            )
+            continue
+        retained.append(update)
+    plan["event_updates"] = retained
+    plan["script_noop_update_drops"] = drops
+
+
+def _assign_event_update_slots_from_partition(plan: dict[str, Any]) -> None:
+    """把模型使用的稳定分块键换成脚本生成的运行 slot。"""
+
+    key_to_slot = {
+        str(segment.get("partition_key", "")): str(segment.get("slot", ""))
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict)
+        and str(segment.get("partition_key", ""))
+        and str(segment.get("slot", ""))
+    }
+    assignments: list[dict[str, str]] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            continue
+        partition_key = str(update.get("partition_key", "")).strip()
+        slot = key_to_slot.get(partition_key)
+        if not partition_key or not slot:
+            continue
+        previous = str(update.get("slot", "")).strip()
+        update["slot"] = slot
+        assignments.append(
+            {
+                "partition_key": partition_key,
+                "slot": slot,
+                "model_slot": previous,
+            }
+        )
+    plan["script_partition_slot_assignments"] = assignments
+
+
+def _repair_unique_event_update_slot(plan: dict[str, Any]) -> None:
+    """只有一项未识别槽且恰好缺一项分段内容时，脚本确定性修正模型笔误。"""
+
+    segment_slots = _unique(
+        str(segment.get("slot", ""))
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict) and str(segment.get("slot", ""))
+    )
+    updates = [
+        update
+        for update in _as_list(plan.get("event_updates"))
+        if isinstance(update, dict)
+    ]
+    update_slots = [str(update.get("slot", "")) for update in updates]
+    missing = [slot for slot in segment_slots if slot not in update_slots]
+    unknown = _unique(slot for slot in update_slots if slot not in segment_slots)
+    repairs: list[dict[str, str]] = []
+    if len(missing) == 1 and len(unknown) == 1 and update_slots.count(unknown[0]) == 1:
+        for update in updates:
+            if str(update.get("slot", "")) != unknown[0]:
+                continue
+            update["slot"] = missing[0]
+            repairs.append({"model_slot": unknown[0], "script_slot": missing[0]})
+            break
+    plan["script_slot_repairs"] = repairs
+
+
+def _reassign_event_beats_by_source(plan: dict[str, Any]) -> None:
+    """来源只落入一个其他分段时自动换挂；含混情况留给校验器阻止写入。"""
+
+    slot_refs = {
+        str(segment.get("slot", "")): {
+            str(ref) for ref in _as_list(segment.get("source_refs"))
+        }
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict)
+    }
+    updates = {
+        str(update.get("slot", "")): update
+        for update in _as_list(plan.get("event_updates"))
+        if isinstance(update, dict)
+    }
+    moves: list[tuple[str, str, dict[str, Any]]] = []
+    for source_slot, update in updates.items():
+        retained: list[Any] = []
+        for beat in _as_list(update.get("event_beats_add")):
+            if not isinstance(beat, dict):
+                retained.append(beat)
+                continue
+            refs = {str(ref) for ref in _as_list(beat.get("source_refs"))}
+            if refs and refs.issubset(slot_refs.get(source_slot, set())):
+                retained.append(beat)
+                continue
+            targets = [
+                slot
+                for slot, allowed_refs in slot_refs.items()
+                if refs and refs.issubset(allowed_refs) and slot in updates
+            ]
+            if len(targets) == 1:
+                moves.append((source_slot, targets[0], deepcopy(beat)))
+            else:
+                retained.append(beat)
+        update["event_beats_add"] = retained
+    for source_slot, target_slot, beat in moves:
+        updates[target_slot].setdefault("event_beats_add", []).append(beat)
+    plan["script_beat_reassignments"] = [
+        {
+            "from_slot": source_slot,
+            "to_slot": target_slot,
+            "source_refs": deepcopy(beat.get("source_refs", [])),
+        }
+        for source_slot, target_slot, beat in moves
+    ]
+
+
+def _canonicalize_key_details(
+    plan: dict[str, Any], rounds: list[dict[str, Any]]
+) -> None:
+    """把特写还原为可核对原文；无法定位的软性候选不阻塞整批。"""
+
+    assigned: dict[str, dict[str, str]] = {}
+    for segment in bounded_segments_for_content(plan, rounds):
+        slot_messages = assigned.setdefault(str(segment.get("slot", "")), {})
+        for message in _as_list(segment.get("assigned_messages")):
+            if isinstance(message, dict):
+                slot_messages[str(message.get("ref", ""))] = str(
+                    message.get("content", "")
+                )
+
+    repairs: list[dict[str, Any]] = []
+    drops: list[dict[str, Any]] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            continue
+        slot = str(update.get("slot", ""))
+        slot_messages = assigned.get(slot, {})
+        canonical_details: list[dict[str, Any]] = []
+        for detail in _as_list(update.get("new_key_details")):
+            if not isinstance(detail, dict):
+                drops.append({"slot": slot, "reason": "候选不是对象"})
+                continue
+            kind = str(detail.get("kind", ""))
+            content = str(detail.get("content", "")).strip()
+            if kind not in {"statement", "action"} or not content:
+                drops.append(
+                    {"slot": slot, "content": content, "reason": "种类或正文为空"}
+                )
+                continue
+
+            declared_refs = [
+                str(ref)
+                for ref in _as_list(detail.get("source_refs"))
+                if str(ref) in slot_messages
+            ]
+            search_refs = _unique([*declared_refs, *slot_messages.keys()])
+            exact: list[tuple[str, str]] = []
+            for ref in search_refs:
+                span = anchor_span(slot_messages[ref], content)
+                if span is not None:
+                    exact.append((ref, slot_messages[ref][span[0] : span[1]]))
+
+            matches = exact
+            repair_kind = "exact_source"
+            if not matches:
+                fuzzy = [
+                    (ref, candidate)
+                    for ref in search_refs
+                    if (candidate := _nearest_source_quote(slot_messages[ref], content))
+                    is not None
+                ]
+                distinct = {normalize_anchor(candidate) for _, candidate in fuzzy}
+                if len(distinct) == 1:
+                    matches = fuzzy
+                    repair_kind = "near_source"
+
+            if not matches:
+                drops.append(
+                    {"slot": slot, "content": content, "reason": "无法唯一核对原文"}
+                )
+                continue
+
+            canonical = matches[0][1]
+            matching_refs = _unique(
+                ref
+                for ref, candidate in matches
+                if normalize_anchor(candidate) == normalize_anchor(canonical)
+            )
+            fixed = deepcopy(detail)
+            fixed["content"] = canonical
+            fixed["source_refs"] = matching_refs
+            canonical_details.append(fixed)
+            if canonical != content or matching_refs != declared_refs:
+                repairs.append(
+                    {
+                        "slot": slot,
+                        "kind": repair_kind,
+                        "model_content": content,
+                        "source_content": canonical,
+                        "source_refs": matching_refs,
+                    }
+                )
+        update["new_key_details"] = canonical_details
+    plan["script_detail_repairs"] = repairs
+    plan["script_detail_drops"] = drops
 
 
 def _nearest_source_quote(text: str, quote: str) -> str | None:
@@ -882,6 +1682,63 @@ def validate_event_plan(
         warnings.append("模型未提供边界短理由；不影响来源分段和提交")
     if not isinstance(plan.get("boundary_uncertainties"), list):
         errors.append("boundary_uncertainties 必须是数组")
+
+    partition = plan.get("script_partition")
+    if isinstance(partition, dict):
+        if not isinstance(plan.get("boundary_merges"), list):
+            errors.append("boundary_merges 必须是数组")
+        if not isinstance(plan.get("additional_starts"), list):
+            errors.append("additional_starts 必须是数组")
+        seen_merge_ids: set[str] = set()
+        for item in _as_list(plan.get("boundary_merges")):
+            if not isinstance(item, dict):
+                warnings.append("boundary_merges 中的非对象项已按候选编号兼容读取")
+                continue
+            candidate_id = str(item.get("candidate_id", "")).strip()
+            reason_code = str(item.get("reason_code", "")).strip()
+            if candidate_id in seen_merge_ids:
+                warnings.append(f"{candidate_id} 被重复列为合并交界；脚本已去重")
+            seen_merge_ids.add(candidate_id)
+            if reason_code not in EVENT_MERGE_REASON_CODES:
+                warnings.append(
+                    f"{candidate_id or '一项候选交界'} 的合并原因代码未识别；"
+                    "原因只用于诊断，不为此重试"
+                )
+        warnings.extend(str(item) for item in _as_list(partition.get("warnings")))
+
+    boundary_start_refs: set[str] = set()
+    for segment_index, segment in enumerate(_as_list(plan.get("segments"))):
+        if not isinstance(segment, dict):
+            continue
+        slot = str(segment.get("slot", ""))
+        introduces_boundary = segment_index > 0 or (
+            bool(state.get("events")) and slot.startswith("new_")
+        )
+        if not introduces_boundary:
+            continue
+        boundary_start_refs.update(
+            str(anchor.get("source_ref", ""))
+            for anchor in _as_list(segment.get("start_anchors"))
+            if isinstance(anchor, dict)
+        )
+    source_blocks = event_source_blocks(rounds)
+    block_opening_refs = {
+        str(block.get("block_id", "")): str(
+            (block.get("opening") or {}).get("source_ref", "")
+        )
+        for block in source_blocks
+    }
+    for candidate in event_boundary_candidates(state, source_blocks):
+        strong_clue = any(
+            isinstance(clue, dict) and clue.get("kind") == "scene_place_change"
+            for clue in _as_list(candidate.get("script_clues"))
+        )
+        right_ref = block_opening_refs.get(str(candidate.get("right", "")), "")
+        if strong_clue and right_ref and right_ref not in boundary_start_refs:
+            warnings.append(
+                f"脚本检测到 {candidate.get('candidate_id')} 有场景地点变化，但模型未在该回合开头分段；"
+                "仅记录为过粗风险，不自动改写或重试"
+            )
     try:
         source_state = deepcopy(state)
         _ensure_event_beats(source_state)
@@ -895,6 +1752,13 @@ def validate_event_plan(
     if not isinstance(updates, list):
         return _unique(errors + ["event_updates 必须是数组"]), warnings
     valid_refs = {message["ref"] for message in batch_messages(rounds)}
+    segment_refs = {
+        str(segment.get("slot", "")): {
+            str(ref) for ref in _as_list(segment.get("source_refs"))
+        }
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict)
+    }
     events_by_id = {event["id"]: event for event in boundary_state["events"]}
     for index, update in enumerate(updates):
         if not isinstance(update, dict):
@@ -923,6 +1787,10 @@ def validate_event_plan(
                 or any(ref not in valid_refs for ref in refs)
             ):
                 errors.append(f"{slot} 的事实段 {beat_index + 1} 来源不在本批")
+            elif any(str(ref) not in segment_refs.get(slot, set()) for ref in refs):
+                errors.append(
+                    f"{slot} 的事实段 {beat_index + 1} 来源不属于该 Event 分段"
+                )
         description = str(update.get("description", "")).strip()
         if len(description) > 160:
             warnings.append(
@@ -971,6 +1839,21 @@ def validate_event_plan(
     )
     errors.extend(content_errors)
     warnings.extend(content_warnings)
+    if _as_list(plan.get("script_beat_reassignments")):
+        warnings.append("脚本按唯一来源分段自动换挂了事实段")
+    if _as_list(plan.get("script_update_coalesces")):
+        warnings.append("脚本已把撤销交界后的重复 Event 更新归入最终分区")
+    if _as_list(plan.get("script_noop_update_drops")):
+        warnings.append("脚本已删除不属于最终分段且不含本批事实的 Event 空更新")
+    if _as_list(plan.get("script_slot_repairs")):
+        warnings.append("脚本按唯一缺失分段修正了一处 Event slot 笔误")
+    if _as_list(plan.get("script_detail_repairs")):
+        warnings.append("脚本已把关键特写还原为可核对的来源原文")
+    for item in _as_list(plan.get("script_detail_drops")):
+        if isinstance(item, dict):
+            warnings.append(
+                f"{item.get('slot', '')} 有一条关键特写无法可靠核对，已软性丢弃且不重试整批"
+            )
     if len(_as_list(plan.get("segments"))) > 1:
         warnings.extend(str(item) for item in _as_list(plan.get("boundary_uncertainties")))
     return _unique(errors), _unique(warnings)
@@ -1092,6 +1975,10 @@ def normalize_entity_plan(
             entity.get("character_data"), dict
         ):
             entity["character_data_patch"] = entity.pop("character_data")
+        if "domain_data_patch" not in entity and isinstance(
+            entity.get("domain_data"), dict
+        ):
+            entity["domain_data_patch"] = entity.pop("domain_data")
         entity.setdefault("aliases_add", [])
         entity.setdefault("event_link_evidence", [])
         if rounds is not None:
@@ -1273,6 +2160,13 @@ def validate_entity_plan(
             errors.append(f"entities[{index}].character_data_patch 非法")
         if entity_type != "character" and character_patch not in (None, {}):
             warnings.append(f"{key} 不是 Character，character_data_patch 将被忽略")
+        domain_patch = entity.get("domain_data_patch")
+        if entity_type != "character" and domain_patch is not None and not isinstance(
+            domain_patch, dict
+        ):
+            errors.append(f"entities[{index}].domain_data_patch 非法")
+        if entity_type == "character" and domain_patch not in (None, {}):
+            warnings.append(f"{key} 是 Character，domain_data_patch 将被忽略")
 
     for index, relation in enumerate(relations):
         if not isinstance(relation, dict):
@@ -1363,6 +2257,7 @@ def run_model_task(
     thinking_mode: str = "default",
     response_format: str = "text",
     stream_idle_timeout: float = 90.0,
+    content_start_timeout: float = 90.0,
     retry_offset_seconds: float = 0.0,
     candidate_attempt_limit: int = 1,
     transport_attempt_limit: int = 1,
@@ -1393,9 +2288,13 @@ def run_model_task(
                     thinking_mode=thinking_mode,
                     response_format=response_format,
                     stream_idle_timeout=stream_idle_timeout,
+                    content_start_timeout=content_start_timeout,
                 )
                 break
             except RuntimeError as exc:
+                if isinstance(exc, ChatCompletionTransportError):
+                    raw = exc.partial_content
+                    metadata = deepcopy(exc.metadata)
                 transport_failures.append(str(exc))
                 if transport_attempt == transport_attempt_limit:
                     attempts.append(
@@ -1419,6 +2318,7 @@ def run_model_task(
                             "response_format": response_format,
                             "max_tokens": max_tokens,
                             "stream_idle_timeout": stream_idle_timeout,
+                            "content_start_timeout": content_start_timeout,
                         },
                         "attempts": attempts,
                         "elapsed_seconds": round(time.perf_counter() - started, 3),
@@ -1464,6 +2364,7 @@ def run_model_task(
                     "response_format": response_format,
                     "max_tokens": max_tokens,
                     "stream_idle_timeout": stream_idle_timeout,
+                    "content_start_timeout": content_start_timeout,
                 },
                 "attempts": attempts,
                 "plan": plan,
@@ -1491,6 +2392,7 @@ def run_model_task(
             "response_format": response_format,
             "max_tokens": max_tokens,
             "stream_idle_timeout": stream_idle_timeout,
+            "content_start_timeout": content_start_timeout,
         },
         "attempts": attempts,
         "plan": attempts[-1].get("parsed_plan") if attempts else None,
@@ -1520,15 +2422,83 @@ def _merge_keyed_list(
 
 
 def _deep_patch(existing: Any, patch: dict[str, Any]) -> dict[str, Any]:
-    """递归应用对象补丁；省略即不变，显式标量或数组表示当前完整值。"""
+    """递归应用对象补丁；可定位条目数组按语义键增量合并。"""
 
     result = deepcopy(existing) if isinstance(existing, dict) else {}
     for field, value in patch.items():
         if isinstance(value, dict):
             result[field] = _deep_patch(result.get(field), value)
+        elif isinstance(value, list):
+            result[field] = _merge_patch_array(field, result.get(field), value)
         else:
             result[field] = deepcopy(value)
     return result
+
+
+def _merge_patch_array(field: str, existing: Any, patch: list[Any]) -> list[Any]:
+    """只对有稳定语义身份的数组做增量合并；其他数组仍是完整替换。"""
+
+    key_functions: dict[str, Callable[[Any], Any]] = {
+        "inventory": lambda item: item.get("item_key") if isinstance(item, dict) else None,
+        "skills": lambda item: item.get("skill_key") if isinstance(item, dict) else None,
+        "preferences": lambda item: (
+            item.get("attitude"),
+            item.get("subject"),
+        )
+        if isinstance(item, dict)
+        else None,
+        "objectives": lambda item: (
+            item.get("objective_key") or item.get("description")
+            if isinstance(item, dict)
+            else None
+        ),
+        "states": lambda item: (
+            item.get("state_key") or (item.get("kind"), item.get("description"))
+            if isinstance(item, dict)
+            else None
+        ),
+        "roles": lambda item: item.get("role_key") if isinstance(item, dict) else None,
+        "long_term_directions": lambda item: (
+            item.get("direction_key") or item.get("description")
+            if isinstance(item, dict)
+            else item
+        ),
+        "mechanics": lambda item: (
+            item.get("entry_key") or item.get("kind")
+            if isinstance(item, dict)
+            else None
+        ),
+        "requirements": lambda item: (
+            item.get("entry_key") or item.get("kind")
+            if isinstance(item, dict)
+            else None
+        ),
+        "rules": lambda item: (
+            item.get("rule_key") or item.get("statement")
+            if isinstance(item, dict)
+            else None
+        ),
+        "numeric_bindings": lambda item: (
+            item.get("binding_key") if isinstance(item, dict) else None
+        ),
+        "stages": lambda item: item.get("stage_key") if isinstance(item, dict) else None,
+        "context_blocks": lambda item: (
+            item.get("context_key") or item.get("purpose")
+            if isinstance(item, dict)
+            else None
+        ),
+        "related_concepts": lambda item: (
+            item.get("concept_key") if isinstance(item, dict) else None
+        ),
+    }
+    key = key_functions.get(field)
+    if key is None:
+        return deepcopy(patch)
+    return _merge_keyed_list(
+        [item for item in _as_list(existing)],
+        deepcopy(patch),
+        key,
+    )
 
 
 def apply_event_candidate(
@@ -1804,6 +2774,10 @@ def apply_entity_candidates(
             merged["character_data"] = _deep_patch(
                 old.get("character_data"), candidate["character_data_patch"]
             )
+        if isinstance(candidate.get("domain_data_patch"), dict):
+            merged["domain_data"] = _deep_patch(
+                old.get("domain_data"), candidate["domain_data_patch"]
+            )
         merged["stub"] = False
         entities[key] = merged
 
@@ -1881,7 +2855,26 @@ def referenced_candidate_keys(state: dict[str, Any]) -> set[str]:
                 preference.get("related_entity_key")
             ):
                 keys.add(preference["related_entity_key"])
+        keys.update(_entity_keys_in_value(candidate.get("domain_data")))
     return {key for key in keys if is_entity_key(key)}
+
+
+def _entity_keys_in_value(value: Any) -> set[str]:
+    """递归收集类型专项稀疏补丁中的候选键，不解释字段业务语义。"""
+
+    if isinstance(value, str):
+        return {value} if is_entity_key(value) else set()
+    if isinstance(value, list):
+        result: set[str] = set()
+        for item in value:
+            result.update(_entity_keys_in_value(item))
+        return result
+    if isinstance(value, dict):
+        result = set()
+        for item in value.values():
+            result.update(_entity_keys_in_value(item))
+        return result
+    return set()
 
 
 def ensure_minimal_entity_nodes(state: dict[str, Any]) -> list[str]:
@@ -2243,9 +3236,10 @@ def _character_components(
         horizon = item.get("horizon")
         if not description or horizon not in {"short_term", "medium_term"}:
             continue
+        objective_key = str(item.get("objective_key", "")).strip()
         objective: dict[str, Any] = {
             "objective_id": _mapped_local_id(
-                state, f"{candidate_key}:{description}", "objective"
+                state, f"{candidate_key}:{objective_key or description}", "objective"
             ),
             "description": description,
             "horizon": horizon,
@@ -2270,43 +3264,699 @@ def _character_components(
             "schema_version": "0.1.0",
             "data": {"location_ref": _ref(state, location_key)},
         }
-    inventory = []
-    for item in _as_list(data.get("inventory")):
-        if not isinstance(item, dict) or not is_entity_key(item.get("item_key"), "item"):
-            continue
-        roles = [
-            role for role in _unique(_as_list(item.get("roles"))) if role in INVENTORY_ROLES
-        ]
-        if roles:
-            inventory.append(
-                {
-                    "item_ref": _ref(state, item["item_key"]),
-                    "inventory_roles": roles,
-                }
-            )
-    if inventory:
-        components["inventory_reference"] = {
-            "schema_version": "0.1.0",
-            "data": {"item_refs": inventory},
-        }
     skills = []
     for item in _as_list(data.get("skills")):
         if not isinstance(item, dict) or not is_entity_key(item.get("skill_key"), "skill"):
             continue
         proficiency = str(item.get("proficiency_description", "")).strip()
         if proficiency:
-            skills.append(
-                {
-                    "skill_ref": _ref(state, item["skill_key"]),
-                    "proficiency_description": proficiency,
-                }
-            )
+            skill_entry: dict[str, Any] = {
+                "skill_ref": _ref(state, item["skill_key"]),
+                "proficiency_description": proficiency,
+            }
+            raw_stage = item.get("stage_state")
+            if isinstance(raw_stage, dict):
+                mode = raw_stage.get("evaluation_mode")
+                framework_key = raw_stage.get("framework_key") or item["skill_key"]
+                if mode in {"semantic", "numeric_derived", "hybrid"} and is_entity_key(
+                    framework_key
+                ) and entity_type_from_key(framework_key) in {"skill", "concept"}:
+                    stage_state: dict[str, Any] = {
+                        "evaluation_mode": mode,
+                        "framework_ref": _ref(state, framework_key),
+                        "numeric_values": [],
+                    }
+                    stage_key = str(raw_stage.get("current_stage_key", "")).strip()
+                    if stage_key:
+                        stage_kind = (
+                            "skill_stage"
+                            if entity_type_from_key(framework_key) == "skill"
+                            else "concept_stage"
+                        )
+                        stage_state["current_stage_id"] = _mapped_local_id(
+                            state, f"{framework_key}:{stage_key}", stage_kind
+                        )
+                    binding_kind = (
+                        "skill_numeric_binding"
+                        if entity_type_from_key(framework_key) == "skill"
+                        else "stage_numeric_binding"
+                    )
+                    for raw_value in _as_list(raw_stage.get("muv_values")):
+                        if not isinstance(raw_value, dict) or not isinstance(
+                            raw_value.get("value"), (int, float)
+                        ):
+                            continue
+                        binding_key = str(raw_value.get("binding_key", "")).strip()
+                        if not binding_key:
+                            continue
+                        stage_state["numeric_values"].append(
+                            {
+                                "numeric_binding_id": _mapped_local_id(
+                                    state,
+                                    f"{framework_key}:{binding_key}",
+                                    binding_kind,
+                                ),
+                                "value": raw_value["value"],
+                            }
+                        )
+                    skill_entry["stage_state"] = stage_state
+            skills.append(skill_entry)
     if skills:
         components["skill_reference"] = {
-            "schema_version": "0.1.0",
+            "schema_version": "0.2.0" if any("stage_state" in item for item in skills) else "0.1.0",
             "data": {"skill_refs": skills},
         }
     return components
+
+
+def _inventory_placement_hints(
+    state: dict[str, Any],
+) -> dict[str, dict[str, str]]:
+    """把 Character 提取到的物品栏候选转换为 Item 放置提示。
+
+    同一 Item 被多个 Character 同时声明时不猜测持有人；显式 Item Placement 会在
+    ``_domain_components`` 中优先于这里的兼容输入。
+    """
+
+    collected: dict[str, list[dict[str, str]]] = {}
+    role_priority = {"carried": 0, "worn": 1, "equipped": 2}
+    for character_key, candidate in sorted(state["entity_candidates"].items()):
+        if not is_entity_key(character_key, "character"):
+            continue
+        data = candidate.get("character_data") or {}
+        for entry in _as_list(data.get("inventory")):
+            if not isinstance(entry, dict) or not is_entity_key(
+                entry.get("item_key"), "item"
+            ):
+                continue
+            roles = [
+                role
+                for role in _unique(_as_list(entry.get("roles")))
+                if role in INVENTORY_ROLES
+            ]
+            if not roles:
+                continue
+            role = max(roles, key=lambda value: role_priority[value])
+            collected.setdefault(entry["item_key"], []).append(
+                {"target_key": character_key, "role": role}
+            )
+
+    result: dict[str, dict[str, str]] = {}
+    for item_key, hints in collected.items():
+        unique_targets = {item["target_key"] for item in hints}
+        if len(unique_targets) == 1:
+            result[item_key] = max(
+                hints, key=lambda item: role_priority[item["role"]]
+            )
+        else:
+            _append_warning(
+                state,
+                f"{item_key} 同时出现在多个 Character 物品栏候选中；未自动写入放置事实。",
+            )
+    return result
+
+
+def _domain_components(
+    state: dict[str, Any],
+    candidate_key: str,
+    candidate: dict[str, Any],
+    placement_hints: dict[str, dict[str, str]],
+) -> dict[str, Any]:
+    """把五类 World Entity 的稀疏语义补丁物化为正式 Component。"""
+
+    entity_type = entity_type_from_key(candidate_key)
+    data = candidate.get("domain_data") or {}
+    if not isinstance(data, dict) or entity_type not in {
+        "location",
+        "item",
+        "organization",
+        "skill",
+        "concept",
+    }:
+        return {}
+    components: dict[str, Any] = {}
+
+    if entity_type == "location":
+        _copy_component(
+            components,
+            "location_profile",
+            data.get("profile"),
+            ("location_kind", "primary_functions", "scale_description", "spatial_characteristics"),
+        )
+        _copy_component(
+            components,
+            "environment_profile",
+            data.get("environment"),
+            (
+                "terrain_and_landform",
+                "climate_tendencies",
+                "natural_resources",
+                "fixed_facilities",
+                "persistent_conditions",
+            ),
+            allow_partial=True,
+        )
+        _copy_component(
+            components,
+            "location_atmosphere",
+            data.get("atmosphere"),
+            ("atmosphere_summary", "sensory_features", "cultural_impressions"),
+        )
+        states = _state_entries(
+            state, candidate_key, data.get("states"), "location_state", "location_state_id"
+        )
+        if states:
+            components["location_state"] = _envelope({"states": states})
+        parent_key = data.get("parent_key")
+        if is_entity_key(parent_key, "location") and parent_key != candidate_key:
+            components["parent_location_reference"] = _envelope(
+                {"parent_location_ref": _ref(state, parent_key)}
+            )
+
+    elif entity_type == "item":
+        _copy_component(
+            components,
+            "item_profile",
+            data.get("profile"),
+            ("item_kind", "instance_mode", "primary_functions", "materials", "form_description"),
+        )
+        _copy_component(
+            components,
+            "item_characteristic",
+            data.get("characteristic"),
+            (
+                "appearance_and_sensory",
+                "craftsmanship",
+                "typical_behavior",
+                "symbolic_meanings",
+            ),
+            allow_partial=True,
+        )
+        raw_states = _state_entries(
+            state, candidate_key, data.get("states"), "item_state", "item_state_id"
+        )
+        item_state: dict[str, Any] = {"states": raw_states}
+        if isinstance(data.get("quantity"), dict):
+            quantity = data["quantity"]
+            if isinstance(quantity.get("amount"), (int, float)) and str(
+                quantity.get("unit", "")
+            ).strip():
+                item_state["quantity"] = {
+                    "amount": quantity["amount"],
+                    "unit": str(quantity["unit"]).strip(),
+                }
+        if raw_states or "quantity" in item_state:
+            components["item_state"] = _envelope(item_state)
+        _copy_component(
+            components,
+            "container_profile",
+            data.get("container"),
+            (
+                "capacity_description",
+                "allowed_contents",
+                "forbidden_contents",
+                "stable_capabilities",
+                "access_requirements",
+            ),
+        )
+        raw_placement = data.get("placement")
+        if not isinstance(raw_placement, dict):
+            raw_placement = placement_hints.get(candidate_key)
+        if isinstance(raw_placement, dict):
+            target_key = raw_placement.get("target_key")
+            role = raw_placement.get("role")
+            target_type = entity_type_from_key(target_key)
+            roles_by_target = {
+                "character": {"carried", "equipped", "worn"},
+                "item": {"contained", "stored"},
+                "location": {"placed", "stored"},
+            }
+            if (
+                is_entity_key(target_key)
+                and target_type in roles_by_target
+                and role in roles_by_target[target_type]
+                and target_key != candidate_key
+            ):
+                placement_data = {
+                    "placement_ref": _ref(state, target_key),
+                    "placement_role": role,
+                }
+                detail = raw_placement.get("detail")
+                if isinstance(detail, str) and detail.strip():
+                    placement_data["placement_detail"] = detail.strip()
+                components["current_placement_reference"] = _envelope(
+                    placement_data
+                )
+
+    elif entity_type == "organization":
+        _copy_component(
+            components,
+            "organization_profile",
+            data.get("profile"),
+            ("organization_kind", "public_role", "operating_scope", "continuity_basis"),
+        )
+        structure = data.get("structure")
+        if isinstance(structure, dict) and str(structure.get("governance_model", "")).strip():
+            roles = []
+            for raw in _as_list(structure.get("roles")):
+                if not isinstance(raw, dict):
+                    continue
+                role_key = str(raw.get("role_key", "")).strip()
+                name = str(raw.get("name", "")).strip()
+                description = str(raw.get("description", "")).strip()
+                if SNAKE_CASE_RE.fullmatch(role_key) and name and description:
+                    roles.append(
+                        {
+                            "organization_role_id": _mapped_local_id(
+                                state, f"{candidate_key}:{role_key}", "organization_role"
+                            ),
+                            "role_key": role_key,
+                            "name": name,
+                            "description": description,
+                        }
+                    )
+            components["organization_structure"] = _envelope(
+                {
+                    "governance_model": str(structure["governance_model"]).strip(),
+                    "roles": roles,
+                }
+            )
+        _copy_component(
+            components,
+            "organization_culture",
+            data.get("culture"),
+            ("summary", "core_values", "norms", "taboos", "behavioral_style"),
+        )
+        strategy = data.get("strategy")
+        if isinstance(strategy, dict) and str(strategy.get("decision_style", "")).strip():
+            directions = []
+            for raw_direction in _as_list(strategy.get("long_term_directions"))[:32]:
+                if isinstance(raw_direction, dict):
+                    description = str(raw_direction.get("description", "")).strip()
+                    direction_key = str(raw_direction.get("direction_key", "")).strip()
+                else:
+                    description = str(raw_direction).strip()
+                    direction_key = ""
+                if not description:
+                    continue
+                directions.append(
+                    {
+                        "organization_direction_id": _mapped_local_id(
+                            state,
+                            f"{candidate_key}:{direction_key or description}",
+                            "organization_direction",
+                        ),
+                        "description": description,
+                    }
+                )
+            components["organization_strategy"] = _envelope(
+                {
+                    "long_term_directions": directions,
+                    "decision_style": str(strategy["decision_style"]).strip(),
+                }
+            )
+        objectives = _objective_entries(state, candidate_key, data.get("objectives"))
+        if objectives:
+            components["organization_objective"] = _envelope({"objectives": objectives})
+        states = _state_entries(
+            state,
+            candidate_key,
+            data.get("states"),
+            "organization_state",
+            "organization_state_id",
+        )
+        if states:
+            components["organization_state"] = _envelope({"states": states})
+        parent_key = data.get("parent_key")
+        if is_entity_key(parent_key, "organization") and parent_key != candidate_key:
+            components["parent_organization_reference"] = _envelope(
+                {"parent_organization_ref": _ref(state, parent_key)}
+            )
+
+    elif entity_type == "skill":
+        _copy_component(
+            components,
+            "skill_definition",
+            data.get("definition") or data.get("profile"),
+            ("skill_kind", "domain", "primary_capabilities", "form_description"),
+        )
+        mechanics = _typed_description_entries(
+            state,
+            candidate_key,
+            data.get("mechanics"),
+            id_kind="skill_mechanic",
+            id_field="skill_mechanic_id",
+        )
+        if mechanics:
+            components["skill_mechanics"] = _envelope({"mechanics": mechanics})
+        _copy_component(
+            components,
+            "skill_characteristic",
+            data.get("characteristic"),
+            ("style_summary", "sensory_signatures", "tactical_tendencies", "distinguishing_features"),
+        )
+        requirements = _typed_description_entries(
+            state,
+            candidate_key,
+            data.get("requirements"),
+            id_kind="skill_requirement",
+            id_field="skill_requirement_id",
+            role_field="requirement_role",
+            allowed_roles={"required", "optional", "alternative"},
+        )
+        if requirements:
+            components["skill_requirement"] = _envelope({"requirements": requirements})
+        progression = _stage_data(
+            state,
+            candidate_key,
+            data.get("progression") or data.get("progression_or_stage_framework"),
+            skill=True,
+        )
+        if progression is not None:
+            components["skill_progression"] = _envelope(progression)
+
+    elif entity_type == "concept":
+        _copy_component(
+            components,
+            "concept_definition",
+            data.get("definition") or data.get("profile"),
+            ("concept_kind", "definition", "epistemic_status", "operational_role", "scope_summary"),
+        )
+        rules = []
+        for raw in _as_list(data.get("rules") or data.get("mechanics_or_rules")):
+            if not isinstance(raw, dict):
+                continue
+            kind = str(raw.get("kind", "")).strip()
+            statement = str(raw.get("statement", "")).strip()
+            applicability = str(raw.get("applicability", "")).strip()
+            consequence = str(raw.get("consequence", "")).strip()
+            status = raw.get("status")
+            if (
+                SNAKE_CASE_RE.fullmatch(kind)
+                and statement
+                and applicability
+                and consequence
+                and status in {"active", "inactive", "superseded"}
+            ):
+                rule_key = str(raw.get("rule_key", "")).strip() or f"{kind}:{statement}"
+                rules.append(
+                    {
+                        "concept_rule_id": _mapped_local_id(
+                            state, f"{candidate_key}:{rule_key}", "concept_rule"
+                        ),
+                        "kind": kind,
+                        "statement": statement,
+                        "applicability": applicability,
+                        "consequence": consequence,
+                        "status": status,
+                    }
+                )
+        if rules:
+            components["concept_rule"] = _envelope({"rules": rules})
+        stage_framework = _stage_data(
+            state,
+            candidate_key,
+            data.get("stage_framework") or data.get("progression_or_stage_framework"),
+            skill=False,
+        )
+        if stage_framework is not None:
+            components["stage_framework"] = _envelope(stage_framework)
+        _copy_component(
+            components,
+            "applicability",
+            data.get("applicability"),
+            ("applies_to_entity_types", "conditions", "exclusions", "exceptions", "prerequisites"),
+        )
+
+    related = []
+    for raw in _as_list(data.get("related_concepts")):
+        if not isinstance(raw, dict) or not is_entity_key(
+            raw.get("concept_key"), "concept"
+        ):
+            continue
+        roles = [
+            role
+            for role in _nonempty_strings(raw.get("roles"), 16)
+            if SNAKE_CASE_RE.fullmatch(role)
+        ]
+        if roles:
+            related.append(
+                {"concept_ref": _ref(state, raw["concept_key"]), "relation_roles": roles}
+            )
+    if related:
+        components["related_concept_reference"] = _envelope({"concept_refs": related})
+    return components
+
+
+def _envelope(data: dict[str, Any], version: str = "0.1.0") -> dict[str, Any]:
+    return {"schema_version": version, "data": data}
+
+
+def _copy_component(
+    components: dict[str, Any],
+    component_name: str,
+    raw: Any,
+    fields: tuple[str, ...],
+    *,
+    allow_partial: bool = False,
+) -> None:
+    if not isinstance(raw, dict):
+        return
+    if fields and not allow_partial and any(field not in raw for field in fields):
+        return
+    selected_fields = fields if fields else tuple(raw)
+    data = {field: deepcopy(raw[field]) for field in selected_fields if field in raw}
+    if (allow_partial and data) or (not allow_partial and (not fields or len(data) == len(fields))):
+        components[component_name] = _envelope(data)
+
+
+def _state_entries(
+    state: dict[str, Any],
+    candidate_key: str,
+    raw_entries: Any,
+    id_kind: str,
+    id_field: str,
+) -> list[dict[str, Any]]:
+    result = []
+    for raw in _as_list(raw_entries):
+        if not isinstance(raw, dict):
+            continue
+        kind = str(raw.get("kind", "")).strip()
+        description = str(raw.get("description", "")).strip()
+        status = raw.get("status")
+        if not SNAKE_CASE_RE.fullmatch(kind) or not description or status not in {
+            "active",
+            "inactive",
+        }:
+            continue
+        state_key = str(raw.get("state_key", "")).strip() or f"{kind}:{description}"
+        result.append(
+            {
+                id_field: _mapped_local_id(
+                    state, f"{candidate_key}:{state_key}", id_kind
+                ),
+                "kind": kind,
+                "description": description,
+                "status": status,
+            }
+        )
+    return result
+
+
+def _objective_entries(
+    state: dict[str, Any], candidate_key: str, raw_entries: Any
+) -> list[dict[str, Any]]:
+    result = []
+    for raw in _as_list(raw_entries):
+        if not isinstance(raw, dict):
+            continue
+        description = str(raw.get("description", "")).strip()
+        horizon = raw.get("horizon")
+        if not description or horizon not in {"short_term", "medium_term"}:
+            continue
+        objective_key = str(raw.get("objective_key", "")).strip()
+        entry: dict[str, Any] = {
+            "objective_id": _mapped_local_id(
+                state, f"{candidate_key}:{objective_key or description}", "objective"
+            ),
+            "description": description,
+            "horizon": horizon,
+        }
+        refs = [
+            _ref(state, key)
+            for key in _as_list(raw.get("related_entity_keys"))
+            if is_entity_key(key)
+        ]
+        if refs:
+            entry["related_entity_refs"] = refs
+        result.append(entry)
+    return result
+
+
+def _typed_description_entries(
+    state: dict[str, Any],
+    candidate_key: str,
+    raw_entries: Any,
+    *,
+    id_kind: str,
+    id_field: str,
+    role_field: str | None = None,
+    allowed_roles: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    result = []
+    for raw in _as_list(raw_entries):
+        if not isinstance(raw, dict):
+            continue
+        kind = str(raw.get("kind", "")).strip()
+        description = str(raw.get("description", "")).strip()
+        if not SNAKE_CASE_RE.fullmatch(kind) or not description:
+            continue
+        if role_field is not None and raw.get(role_field) not in (allowed_roles or set()):
+            continue
+        local_key = str(raw.get("entry_key", "")).strip() or f"{kind}:{description}"
+        entry: dict[str, Any] = {
+            id_field: _mapped_local_id(
+                state, f"{candidate_key}:{local_key}", id_kind
+            ),
+            "kind": kind,
+            "description": description,
+        }
+        if role_field is not None:
+            entry[role_field] = raw[role_field]
+        result.append(entry)
+    return result
+
+
+def _stage_data(
+    state: dict[str, Any],
+    candidate_key: str,
+    raw: Any,
+    *,
+    skill: bool,
+) -> dict[str, Any] | None:
+    """为 Skill/Concept 阶段草案生成稳定局部 ID 和 MUV Binding 引用。"""
+
+    if not isinstance(raw, dict):
+        return None
+    summary_field = "progression_summary" if skill else "framework_summary"
+    summary = str(raw.get(summary_field) or raw.get("summary") or "").strip()
+    if not summary or not isinstance(raw.get("ordered"), bool):
+        return None
+    evaluation = raw.get("stage_evaluation") or raw.get("evaluation")
+    if not isinstance(evaluation, dict) or evaluation.get("mode") not in {
+        "semantic",
+        "numeric_derived",
+        "hybrid",
+    }:
+        return None
+    binding_kind = "skill_numeric_binding" if skill else "stage_numeric_binding"
+    stage_kind = "skill_stage" if skill else "concept_stage"
+    context_kind = "skill_stage_context" if skill else "concept_stage_context"
+    stage_id_name = "skill_stage_id" if skill else "stage_id"
+    bindings = []
+    binding_ids: dict[str, str] = {}
+    for raw_binding in _as_list(evaluation.get("numeric_bindings")):
+        if not isinstance(raw_binding, dict):
+            continue
+        binding_key = str(raw_binding.get("binding_key", "")).strip()
+        provider = str(raw_binding.get("provider", "")).strip()
+        variable_key = str(raw_binding.get("variable_key", "")).strip()
+        value_source = raw_binding.get("value_source")
+        if (
+            not binding_key
+            or not SNAKE_CASE_RE.fullmatch(provider)
+            or not variable_key
+            or value_source
+            not in {"host", "character_skill_reference", "external_variable_store"}
+        ):
+            continue
+        binding_id = _mapped_local_id(
+            state, f"{candidate_key}:{binding_key}", binding_kind
+        )
+        binding_ids[binding_key] = binding_id
+        bindings.append(
+            {
+                "numeric_binding_id": binding_id,
+                "provider": provider,
+                "variable_key": variable_key,
+                "value_source": value_source,
+            }
+        )
+    stages = []
+    for raw_stage in _as_list(raw.get("stages")):
+        if not isinstance(raw_stage, dict):
+            continue
+        stage_key = str(raw_stage.get("stage_key", "")).strip()
+        name = str(raw_stage.get("name", "")).strip()
+        description = str(raw_stage.get("description", "")).strip()
+        if not stage_key or not name or not description:
+            continue
+        stage: dict[str, Any] = {
+            stage_id_name: _mapped_local_id(
+                state, f"{candidate_key}:{stage_key}", stage_kind
+            ),
+            "name": name,
+            "description": description,
+            "numeric_guidance": [],
+            "context_blocks": [],
+        }
+        if isinstance(raw_stage.get("order"), int):
+            stage["order"] = raw_stage["order"]
+        for field in ("entry_guidance", "exit_guidance"):
+            value = str(raw_stage.get(field, "")).strip()
+            if value:
+                stage[field] = value
+        for guidance in _as_list(raw_stage.get("numeric_guidance")):
+            if not isinstance(guidance, dict):
+                continue
+            binding_id = binding_ids.get(str(guidance.get("binding_key", "")))
+            lower = guidance.get("min_inclusive")
+            upper = guidance.get("max_exclusive")
+            if binding_id and isinstance(lower, (int, float)) and isinstance(
+                upper, (int, float)
+            ):
+                stage["numeric_guidance"].append(
+                    {
+                        "numeric_binding_id": binding_id,
+                        "min_inclusive": lower,
+                        "max_exclusive": upper,
+                    }
+                )
+        for raw_block in _as_list(raw_stage.get("context_blocks")):
+            if not isinstance(raw_block, dict):
+                continue
+            purpose = raw_block.get("purpose")
+            content = str(raw_block.get("content", "")).strip()
+            if purpose not in {
+                "character_behavior",
+                "interaction",
+                "narration",
+                "skill_use",
+                "resolver_rule",
+            } or not content:
+                continue
+            context_key = str(raw_block.get("context_key", "")).strip() or str(purpose)
+            stage["context_blocks"].append(
+                {
+                    "stage_context_id": _mapped_local_id(
+                        state,
+                        f"{candidate_key}:{stage_key}:{context_key}",
+                        context_kind,
+                    ),
+                    "purpose": purpose,
+                    "content": content,
+                }
+            )
+        stages.append(stage)
+    return {
+        summary_field: summary,
+        "ordered": raw["ordered"],
+        "stage_evaluation": {
+            "mode": evaluation["mode"],
+            "numeric_bindings": bindings,
+        },
+        "stages": stages,
+    }
 
 
 def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -2317,6 +3967,7 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
     ensure_minimal_entity_nodes(state)
     timestamp = state["run_timestamp"]
     entities: list[dict[str, Any]] = []
+    placement_hints = _inventory_placement_hints(state)
 
     for candidate_key, candidate in sorted(state["entity_candidates"].items()):
         entity_type = entity_type_from_key(candidate_key)
@@ -2335,6 +3986,12 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
         }
         if entity_type == "character":
             components.update(_character_components(state, candidate_key, candidate))
+        else:
+            components.update(
+                _domain_components(
+                    state, candidate_key, candidate, placement_hints
+                )
+            )
         entities.append(
             {
                 "id": _mapped_id(state, "entity", candidate_key, entity_type),
@@ -2400,6 +4057,25 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
                             "participation_roles": ["participant"],
                         }
                         for key in participant_keys
+                    ]
+                },
+            }
+        related_entity_keys = _unique(
+            key
+            for key in event.get("related_entity_keys", [])
+            if entity_type_from_key(key)
+            in {"item", "organization", "skill", "concept"}
+        )
+        if related_entity_keys:
+            components["event_related_entity_reference"] = {
+                "schema_version": "0.1.0",
+                "data": {
+                    "related_entity_refs": [
+                        {
+                            "related_entity_ref": _ref(state, key),
+                            "involvement_roles": ["involved"],
+                        }
+                        for key in related_entity_keys
                     ]
                 },
             }
@@ -2633,6 +4309,7 @@ def render_record(run: dict[str, Any]) -> str:
         "",
         f"- 开始时间：{run.get('started_at', '')}",
         f"- 当前状态：{run.get('status', '')}",
+        f"- 最近已提交检查点：第 {run.get('checkpoint_round_end', 0)} 轮",
         f"- 原始记录：`{run.get('chat_jsonl', '')}`",
         f"- 模型：`{run.get('model', '')}`",
         f"- 接口：`{run.get('endpoint', '')}`",
@@ -2643,7 +4320,7 @@ def render_record(run: dict[str, Any]) -> str:
         f"- 思考设置：`{run.get('thinking_modes', run.get('calibration_modes', {}))}`",
         f"- 返回格式：`{run.get('response_format', '')}`",
         f"- 输出安全上限：`{run.get('max_tokens', {})}`；这是截断上限，不是期望输出长度。",
-        f"- 总超时／流式无进展超时：{run.get('timeout_seconds', '')}／{run.get('stream_idle_timeout_seconds', '')} 秒。",
+        f"- 总超时／流式无字节进展超时／正式正文启动超时：{run.get('timeout_seconds', '')}／{run.get('stream_idle_timeout_seconds', '')}／{run.get('content_start_timeout_seconds', '')} 秒。",
         f"- 每项语义候选上限：{run.get('candidate_attempt_limit', 1)} 次；无正文的传输失败另行恢复。",
         f"- 每项传输尝试上限：{run.get('transport_attempt_limit', 1)} 次。",
         "- Event 判断同时核对事实覆盖、局部中心和边界感知；不预设边界数量。",
@@ -2908,29 +4585,43 @@ def public_state(state: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(state)
 
 
-def flatten_record_history(record: str) -> str:
-    """把递归附录压成线性历史，避免每次恢复都成倍复制旧记录。"""
+def _record_generations(record: str) -> list[str]:
+    """按“当前到更早”展开记录历史；附录只提供回溯，不改变新旧顺序。"""
 
-    if not record.strip():
-        return ""
-    pending = [record]
-    flattened: list[str] = []
+    generations: list[str] = []
     seen: set[str] = set()
-    while pending:
-        current = pending.pop(0)
-        current_run, separator, appendix = current.partition("## 附录：")
+
+    def visit(value: str) -> None:
+        current_run, separator, appendix = value.partition("## 附录：")
+        if not separator:
+            linear = re.split(r"\n\s*---\s*\n(?=# 240 )", value)
+            if len(linear) > 1:
+                for item in linear:
+                    visit(item)
+                return
         current_run = current_run.rstrip()
         if current_run and current_run not in seen:
-            flattened.append(current_run)
+            generations.append(current_run)
             seen.add(current_run)
         if not separator:
-            continue
+            return
         for match in re.finditer(r"<pre>(.*?)</pre>", appendix, re.DOTALL):
             decoded = html.unescape(match.group(1)).strip()
-            if decoded.startswith("# 240 "):
-                pending.append(decoded)
-                break
-    return "\n\n---\n\n".join(flattened)
+            if not decoded.startswith("# 240 "):
+                continue
+            for prior in re.split(r"\n\s*---\s*\n(?=# 240 )", decoded):
+                visit(prior)
+            break
+
+    if record.strip():
+        visit(record)
+    return generations
+
+
+def flatten_record_history(record: str) -> str:
+    """把递归附录压成从新到旧的线性历史，避免成倍复制旧记录。"""
+
+    return "\n\n---\n\n".join(_record_generations(record))
 
 
 def _json_objects_from_record(
@@ -2938,15 +4629,27 @@ def _json_objects_from_record(
 ) -> list[dict[str, Any]]:
     """读取本工具写入的 ``<pre>`` JSON，用于从同一记录恢复检查点。"""
 
-    current_run, separator, appendix = record.partition("## 附录：")
     objects: list[dict[str, Any]] = []
-    if separator and _depth < 12:
-        for match in re.finditer(r"<pre>(.*?)</pre>", appendix, re.DOTALL):
+    # 兼容旧调用者：返回顺序仍为旧到新，因此最后一项属于最新运行。
+    for generation in reversed(_record_generations(record)):
+        for match in re.finditer(r"<pre>(.*?)</pre>", generation, re.DOTALL):
             decoded = html.unescape(match.group(1)).strip()
-            if decoded.startswith("# 240 Event、Memory 与全 Entity"):
-                objects.extend(_json_objects_from_record(decoded, _depth=_depth + 1))
-                break
-    for match in re.finditer(r"<pre>(.*?)</pre>", current_run, re.DOTALL):
+            if not decoded.startswith("{"):
+                continue
+            try:
+                value = json.loads(decoded)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                objects.append(value)
+    return objects
+
+
+def _json_objects_from_generation(generation: str) -> list[dict[str, Any]]:
+    """读取单次运行中的 JSON，不越过附录去借用更早候选。"""
+
+    objects: list[dict[str, Any]] = []
+    for match in re.finditer(r"<pre>(.*?)</pre>", generation, re.DOTALL):
         decoded = html.unescape(match.group(1)).strip()
         if not decoded.startswith("{"):
             continue
@@ -2957,6 +4660,40 @@ def _json_objects_from_record(
         if isinstance(value, dict):
             objects.append(value)
     return objects
+
+
+def _raw_model_plans_from_generation(generation: str) -> list[dict[str, Any]]:
+    """读取模型正式回复中的原始计划，供失败候选在新脚本下重新处理。"""
+
+    plans: list[dict[str, Any]] = []
+    pattern = re.compile(
+        r"<details><summary>[^<]*模型完整正式回复</summary>\s*"
+        r"<pre>(.*?)</pre>\s*</details>",
+        re.DOTALL,
+    )
+    for match in pattern.finditer(generation):
+        decoded = html.unescape(match.group(1)).strip()
+        try:
+            value = extract_json_object(decoded)
+        except ValueError:
+            continue
+        if isinstance(value, dict):
+            plans.append(value)
+    return plans
+
+
+def _plan_task(plan: dict[str, Any]) -> str | None:
+    """识别一个候选属于 Event、Memory 还是其他 Entity。"""
+
+    if "old_forming_disposition" in plan and "event_updates" in plan:
+        return "event"
+    if isinstance(plan.get("memories"), list):
+        return "memory"
+    if isinstance(plan.get("entities"), list) and isinstance(
+        plan.get("relations"), list
+    ):
+        return "entity"
+    return None
 
 
 def _source_round_numbers(value: Any) -> set[int]:
@@ -2976,67 +4713,123 @@ def _source_round_numbers(value: Any) -> set[int]:
     return numbers
 
 
+def validate_gold_scope(
+    gold: dict[str, Any], *, batch_size: int, batch_count: int
+) -> None:
+    """阻止测试轮数与人工样例范围错配后仍发起外部调用。"""
+
+    required_round_end = int(gold.get("source", {}).get("round_end", 0))
+    target_round_end = batch_size * batch_count
+    if required_round_end != target_round_end:
+        raise ValueError(
+            "人工边界样例范围与测试范围不一致："
+            f"样例到第 {required_round_end} 轮，测试到第 {target_round_end} 轮。"
+            "请改用同轮数样例，或不传 --gold。"
+        )
+
+
 def recovery_state_and_current_plans(
     record: str,
     target_round_end: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]]]:
     """取得最后已提交状态及其后失败批次中仍可复用的各任务候选。"""
 
-    states: list[dict[str, Any]] = []
-    plans_by_task: dict[str, list[dict[str, Any]]] = {
-        "event": [],
-        "memory": [],
-        "entity": [],
-    }
-    for value in _json_objects_from_record(record):
-        state = value.get("state_after_batch")
-        if isinstance(state, dict) and isinstance(state.get("events"), list):
-            states.append(state)
-        plan = value.get("parsed_plan")
-        if not isinstance(plan, dict):
-            continue
-        if "old_forming_disposition" in plan and "event_updates" in plan:
-            plans_by_task["event"].append(plan)
-        elif isinstance(plan.get("memories"), list):
-            plans_by_task["memory"].append(plan)
-        elif isinstance(plan.get("entities"), list) and isinstance(
-            plan.get("relations"), list
-        ):
-            plans_by_task["entity"].append(plan)
+    generations = _record_generations(record)
+    objects_by_generation = [
+        _json_objects_from_generation(generation) for generation in generations
+    ]
+    raw_plans_by_generation = [
+        _raw_model_plans_from_generation(generation) for generation in generations
+    ]
+    state_candidates: list[tuple[int, int, dict[str, Any]]] = []
+    for generation_index, values in enumerate(objects_by_generation):
+        for value_index, value in enumerate(values):
+            candidate = value.get("state_after_batch")
+            if isinstance(candidate, dict) and isinstance(
+                candidate.get("events"), list
+            ):
+                state_candidates.append(
+                    (generation_index, value_index, candidate)
+                )
 
+    selected_generation = len(generations) - 1 if generations else 0
     if target_round_end is None:
-        state = deepcopy(states[-1]) if states else initial_unified_state()
+        selected = next(
+            (
+                item
+                for item in state_candidates
+                if item[0]
+                == min(candidate[0] for candidate in state_candidates)
+            ),
+            None,
+        ) if state_candidates else None
+        if selected is not None:
+            same_generation = [
+                item for item in state_candidates if item[0] == selected[0]
+            ]
+            selected = max(same_generation, key=lambda item: item[1])
     else:
         eligible = [
-            (index, candidate)
-            for index, candidate in enumerate(states)
-            if _processed_round_end(candidate) < target_round_end
+            item
+            for item in state_candidates
+            if _processed_round_end(item[2]) < target_round_end
         ]
-        state = (
-            deepcopy(
-                max(
-                    eligible,
-                    key=lambda item: (_processed_round_end(item[1]), item[0]),
-                )[1]
+        selected = (
+            max(
+                eligible,
+                key=lambda item: (
+                    _processed_round_end(item[2]),
+                    -item[0],
+                    item[1],
+                ),
             )
             if eligible
-            else initial_unified_state()
+            else None
         )
+    if selected is None:
+        state = initial_unified_state()
+    else:
+        selected_generation = selected[0]
+        state = deepcopy(selected[2])
+
     processed_round = _processed_round_end(state)
     current: dict[str, dict[str, Any]] = {}
-    for task, plans in plans_by_task.items():
-        for plan in reversed(plans):
+    # 只允许复用最新检查点所在运行及其后的候选；更早附录可能来自旧提示词或错误边界。
+    for generation_index, values in enumerate(
+        objects_by_generation[: selected_generation + 1]
+    ):
+        for value in reversed(values):
+            plan = value.get("parsed_plan")
+            if not isinstance(plan, dict):
+                continue
+            # 旧脚本已经判为失败的加工稿可能丢弃软性内容；保留原始回复，
+            # 让当前脚本重新规范化，不能把失败加工稿当成新的事实来源。
+            if value.get("validation_errors"):
+                continue
+            task = _plan_task(plan)
+            if task is None:
+                continue
+            if task in current:
+                continue
             source_rounds = _source_round_numbers(plan)
-            if (
-                source_rounds
-                and max(source_rounds) > processed_round
-                and (
-                    target_round_end is None
-                    or max(source_rounds) <= target_round_end
-                )
-            ):
-                current[task] = deepcopy(plan)
-                break
+            if not source_rounds or max(source_rounds) <= processed_round:
+                continue
+            if target_round_end is not None and max(source_rounds) > target_round_end:
+                continue
+            current[task] = deepcopy(plan)
+
+        # 如果本代只有失败加工稿，就回到同一次请求的模型正式回复；这不会
+        # 发起外部调用，也不会借用更早运行中的候选。
+        for plan in reversed(raw_plans_by_generation[generation_index]):
+            task = _plan_task(plan)
+            if task is None or task in current:
+                continue
+            source_rounds = _source_round_numbers(plan)
+            if not source_rounds or max(source_rounds) <= processed_round:
+                continue
+            if target_round_end is not None and max(source_rounds) > target_round_end:
+                continue
+            current[task] = deepcopy(plan)
     return state, current
 
 
@@ -3159,8 +4952,10 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
         },
         "timeout_seconds": args.timeout,
         "stream_idle_timeout_seconds": args.stream_idle_timeout,
+        "content_start_timeout_seconds": args.content_start_timeout,
         "candidate_attempt_limit": args.candidate_attempt_limit,
         "transport_attempt_limit": args.transport_attempt_limit,
+        "checkpoint_round_end": processed_round_end,
         "batches": [],
         "gold_evaluation": {},
         "type_counts": {},
@@ -3206,6 +5001,7 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
             thinking_mode=spec["thinking_mode"],
             response_format=spec["response_format"],
             stream_idle_timeout=args.stream_idle_timeout,
+            content_start_timeout=args.content_start_timeout,
             candidate_attempt_limit=args.candidate_attempt_limit,
             transport_attempt_limit=args.transport_attempt_limit,
             normalizer=spec["normalizer"],
@@ -3217,6 +5013,8 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
     if not all(batch["tasks"].get(name, {}).get("ok") for name in task_specs):
         batch["status"] = "task_recovery_failed"
         run["status"] = "failed"
+        run["final_state"] = public_state(state)
+        run["checkpoint_round_end"] = processed_round_end
         persist_single_record(run, output, api_key)
         return run
 
@@ -3253,6 +5051,7 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
     for entity in network:
         counts[entity["type"]] = counts.get(entity["type"], 0) + 1
     run["status"] = "completed" if report.get("valid") else "failed"
+    run["checkpoint_round_end"] = rounds[-1]["round"]
     run["completed_at"] = datetime.now(timezone.utc).isoformat()
     run["final_state"] = public_state(candidate_state)
     run["final_network"] = network
@@ -3261,6 +5060,9 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
     if args.gold:
         gold = load_gold_fixture(
             Path(args.gold).resolve(), Path(args.chat_jsonl).resolve()
+        )
+        validate_gold_scope(
+            gold, batch_size=args.batch_size, batch_count=args.batches
         )
         run["gold_evaluation"] = evaluate_state_against_gold(
             candidate_state, gold, rounds[-1]["round"]
@@ -3403,6 +5205,7 @@ def finalize_recovered_offline(args: argparse.Namespace) -> dict[str, Any]:
         },
         "timeout_seconds": args.timeout,
         "stream_idle_timeout_seconds": args.stream_idle_timeout,
+        "content_start_timeout_seconds": args.content_start_timeout,
         "candidate_attempt_limit": 0,
         "transport_attempt_limit": 0,
         "batches": [batch],
@@ -3416,6 +5219,9 @@ def finalize_recovered_offline(args: argparse.Namespace) -> dict[str, Any]:
     if args.gold:
         gold = load_gold_fixture(
             Path(args.gold).resolve(), Path(args.chat_jsonl).resolve()
+        )
+        validate_gold_scope(
+            gold, batch_size=args.batch_size, batch_count=args.batches
         )
         run["gold_evaluation"] = evaluate_state_against_gold(
             candidate_state, gold, rounds[-1]["round"]
@@ -3460,13 +5266,15 @@ def run_thinking_calibration(args: argparse.Namespace) -> dict[str, Any]:
         "max_tokens": {"event": args.event_max_tokens},
         "timeout_seconds": args.timeout,
         "stream_idle_timeout_seconds": args.stream_idle_timeout,
+        "content_start_timeout_seconds": args.content_start_timeout,
         "candidate_attempt_limit": args.candidate_attempt_limit,
         "transport_attempt_limit": args.transport_attempt_limit,
+        "checkpoint_round_end": 0,
         "calibration_modes": list(args.calibration_modes),
         "calibration_note": (
             f"{len(args.calibration_modes)} 次使用完全相同的首批正文和提示词，按顺序单独发送；"
-            "只改变 thinking 参数。DeepSeek 当前文档中 V4 Flash 的 low、high、max 分别按"
-            " low、high、max 执行；兼容端点是否完整转发仍以实际 reasoning_content 为准。"
+            "只改变 thinking 参数。DeepSeek V4 Flash 当前文档支持 low、high 与 max；"
+            "兼容端点是否完整转发仍以实际 reasoning_content 为准。"
         ),
         "calibration": [],
         "batches": [],
@@ -3492,6 +5300,7 @@ def run_thinking_calibration(args: argparse.Namespace) -> dict[str, Any]:
             thinking_mode=mode,
             response_format=args.response_format,
             stream_idle_timeout=args.stream_idle_timeout,
+            content_start_timeout=args.content_start_timeout,
             candidate_attempt_limit=1,
             transport_attempt_limit=args.transport_attempt_limit,
             normalizer=lambda plan, s=base_state, r=rounds: normalize_event_plan(
@@ -3550,6 +5359,10 @@ def run_probe(
     gold = (
         load_gold_fixture(Path(args.gold).resolve(), chat_jsonl) if args.gold else None
     )
+    if gold is not None:
+        validate_gold_scope(
+            gold, batch_size=args.batch_size, batch_count=args.batches
+        )
     state = (
         deepcopy(initial_state_override)
         if initial_state_override is not None
@@ -3586,8 +5399,10 @@ def run_probe(
         },
         "timeout_seconds": args.timeout,
         "stream_idle_timeout_seconds": args.stream_idle_timeout,
+        "content_start_timeout_seconds": args.content_start_timeout,
         "candidate_attempt_limit": args.candidate_attempt_limit,
         "transport_attempt_limit": args.transport_attempt_limit,
+        "checkpoint_round_end": start_round,
         "batches": [],
         "gold_evaluation": {},
         "type_counts": {},
@@ -3637,6 +5452,7 @@ def run_probe(
                 model=args.model,
                 timeout=args.timeout,
                 stream_idle_timeout=args.stream_idle_timeout,
+                content_start_timeout=args.content_start_timeout,
                 retry_offset_seconds=delay / 2,
                 candidate_attempt_limit=args.candidate_attempt_limit,
                 transport_attempt_limit=args.transport_attempt_limit,
@@ -3705,6 +5521,12 @@ def run_probe(
             batch["status"] = "failed_before_commit"
             batch["elapsed_seconds"] = round(time.perf_counter() - batch_started, 3)
             run["status"] = "failed"
+            run["final_state"] = public_state(state)
+            run["checkpoint_round_end"] = processed_round_end
+            if gold is not None:
+                run["gold_evaluation"] = evaluate_state_against_gold(
+                    state, gold, processed_round_end
+                )
             persist_single_record(run, output, api_key)
             return run
 
@@ -3744,6 +5566,7 @@ def run_probe(
 
         state = candidate_state
         processed_round_end = rounds[-1]["round"]
+        run["checkpoint_round_end"] = processed_round_end
         batch["status"] = "committed"
         commit_label = (
             "Event 状态"
@@ -3809,6 +5632,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=float,
         default=90.0,
         help="流式连接连续无有效传输时的停止秒数；总时长仍由 --timeout 限制。",
+    )
+    parser.add_argument(
+        "--content-start-timeout",
+        type=float,
+        default=90.0,
+        help="持续收到推理但仍未开始正式 content 时的前台停止秒数；零表示关闭。",
     )
     parser.add_argument("--event-max-tokens", type=int, default=32768)
     parser.add_argument("--memory-max-tokens", type=int, default=16384)
@@ -3880,10 +5709,25 @@ def main(argv: list[str] | None = None) -> int:
     if min(args.event_max_tokens, args.memory_max_tokens, args.entity_max_tokens) <= 0:
         print("输出安全上限必须大于零。", file=sys.stderr, flush=True)
         return 1
-    if args.timeout <= 0 or args.stream_idle_timeout < 0:
-        print("总超时必须大于零，流式无进展超时不能小于零。", file=sys.stderr, flush=True)
+    if (
+        args.timeout <= 0
+        or args.stream_idle_timeout < 0
+        or args.content_start_timeout < 0
+    ):
+        print(
+            "总超时必须大于零，流式无进展与正式正文启动超时不能小于零。",
+            file=sys.stderr,
+            flush=True,
+        )
         return 1
     try:
+        if args.gold and not args.thinking_calibration:
+            scope_gold = load_gold_fixture(
+                Path(args.gold).resolve(), Path(args.chat_jsonl).resolve()
+            )
+            validate_gold_scope(
+                scope_gold, batch_size=args.batch_size, batch_count=args.batches
+            )
         if args.finalize_recovered_offline:
             run = finalize_recovered_offline(args)
         elif args.recover_final_batch:

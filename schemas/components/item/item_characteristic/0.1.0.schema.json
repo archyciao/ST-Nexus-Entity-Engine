@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:item:item_characteristic:0.1.0",
+  "title": "ItemCharacteristicComponent 0.1.0",
+  "description": "保存 Item 适合辨识与描写的稳定外观、工艺、表现和象征特征。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "appearance_and_sensory": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 600 }, "uniqueItems": true },
+            "craftsmanship": { "type": "string", "minLength": 1, "maxLength": 800 },
+            "typical_behavior": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 600 }, "uniqueItems": true },
+            "symbolic_meanings": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 600 }, "uniqueItems": true }
+          },
+          "additionalProperties": false,
+          "minProperties": 1
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

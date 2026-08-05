@@ -294,6 +294,55 @@ def build_content_prompt(
     )
 
 
+class ChatCompletionTransportError(RuntimeError):
+    """携带流式失败前已收到的正式正文与非敏感统计。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        partial_content: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.partial_content = partial_content
+        self.metadata = metadata or {}
+
+
+def chat_completion_request_body(
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    *,
+    thinking_mode: str,
+    response_format: str,
+) -> dict[str, Any]:
+    """建立请求体；便于单测确认思考开关没有串用其他 API。"""
+
+    body: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "max_tokens": max_tokens,
+        "stream": True,
+    }
+    if thinking_mode == "off":
+        # DeepSeek 官方开关仍是权威字段；Zen 当前实测还需要顶层 none
+        # 才能稳定关闭。后者是网关兼容行为，保留实际 reasoning 监测兜底。
+        body["thinking"] = {"type": "disabled"}
+        body["reasoning_effort"] = "none"
+        body["temperature"] = 0
+    elif thinking_mode != "default":
+        body["thinking"] = {"type": "enabled"}
+        body["reasoning_effort"] = thinking_mode
+    if response_format == "json_object":
+        body["response_format"] = {"type": "json_object"}
+    return body
+
+
 def call_chat_completion(
     endpoint: str,
     api_key: str,
@@ -306,28 +355,25 @@ def call_chat_completion(
     thinking_mode: str = "default",
     response_format: str = "text",
     stream_idle_timeout: float = 90.0,
+    content_start_timeout: float = 90.0,
 ) -> tuple[str, dict[str, Any]]:
     if thinking_mode not in {"default", "off", "low", "high", "max"}:
         raise ValueError(f"不支持的 thinking_mode：{thinking_mode}")
     if response_format not in {"text", "json_object"}:
         raise ValueError(f"不支持的 response_format：{response_format}")
-    body = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "max_tokens": max_tokens,
-        "stream": True,
+    body = chat_completion_request_body(
+        model,
+        system_prompt,
+        user_prompt,
+        max_tokens,
+        thinking_mode=thinking_mode,
+        response_format=response_format,
+    )
+    wire_controls = {
+        key: deepcopy(body[key])
+        for key in ("thinking", "reasoning_effort", "temperature", "response_format")
+        if key in body
     }
-    if thinking_mode == "off":
-        body["thinking"] = {"type": "disabled"}
-        body["temperature"] = 0
-    elif thinking_mode != "default":
-        body["thinking"] = {"type": "enabled"}
-        body["reasoning_effort"] = thinking_mode
-    if response_format == "json_object":
-        body["response_format"] = {"type": "json_object"}
 
     request_started = time.perf_counter()
     curl = shutil.which("curl.exe") or shutil.which("curl")
@@ -400,6 +446,8 @@ def call_chat_completion(
                 "response_format": response_format,
                 "max_tokens": max_tokens,
                 "stream_idle_timeout": stream_idle_timeout,
+                "content_start_timeout": content_start_timeout,
+                "wire_controls": wire_controls,
             },
             "reasoning_chars": 0,
             "content_chars": 0,
@@ -413,10 +461,23 @@ def call_chat_completion(
         received_chars = 0
         next_progress = 1000
         stream_started = False
+        abort_reason: str | None = None
         for line in process.stdout:
             stripped = line.strip()
             if not stripped:
                 continue
+            elapsed = time.perf_counter() - request_started
+            if (
+                content_start_timeout > 0
+                and metadata["timing_seconds"]["first_content"] is None
+                and elapsed >= content_start_timeout
+            ):
+                abort_reason = (
+                    f"流式响应持续 {round(elapsed, 3)} 秒仍未开始正式 content；"
+                    "已停止本次异常长推理"
+                )
+                process.terminate()
+                break
             if not stripped.startswith("data:"):
                 plain_lines.append(line)
                 continue
@@ -438,6 +499,9 @@ def call_chat_completion(
             metadata["model"] = chunk.get("model") or metadata["model"]
             if chunk.get("usage"):
                 metadata["usage"] = chunk["usage"]
+            metadata["timing_seconds"]["last_stream_activity"] = round(
+                elapsed, 3
+            )
             choices = chunk.get("choices") or []
             if not choices:
                 continue
@@ -466,22 +530,45 @@ def call_chat_completion(
                 received_chars += len(reasoning_delta)
                 metadata["reasoning_chars"] += len(reasoning_delta)
             if received_chars >= next_progress:
-                print(f"  流式接收约 {received_chars} 字符", flush=True)
+                print(
+                    "  流式保活：隐藏推理约 "
+                    f"{metadata['reasoning_chars']} 字，正式正文约 "
+                    f"{metadata['content_chars']} 字",
+                    flush=True,
+                )
                 next_progress += 1000
 
+        if abort_reason is not None and process.poll() is None:
+            process.terminate()
+        try:
+            return_code = process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            return_code = process.wait(timeout=5)
         stderr_text = process.stderr.read()
-        return_code = process.wait(timeout=5)
         metadata["timing_seconds"]["total"] = round(
             time.perf_counter() - request_started, 3
         )
     finally:
         if request_path is not None:
             request_path.unlink(missing_ok=True)
+    content = "".join(content_parts)
+    if abort_reason is not None:
+        raise ChatCompletionTransportError(
+            abort_reason
+            + f"（reasoning_chars={metadata['reasoning_chars']}，"
+            f"content_chars={metadata['content_chars']}）",
+            partial_content=content,
+            metadata=metadata,
+        )
     if return_code != 0:
         detail = ("".join(plain_lines) or stderr_text).strip()
-        raise RuntimeError(f"API 请求失败（curl {return_code}）：{detail[:500]}")
+        raise ChatCompletionTransportError(
+            f"API 请求失败（curl {return_code}）：{detail[:500]}",
+            partial_content=content,
+            metadata=metadata,
+        )
 
-    content = "".join(content_parts)
     if content.strip():
         return content, metadata
 
@@ -530,6 +617,8 @@ def call_chat_completion(
             "response_format": response_format,
             "max_tokens": max_tokens,
             "stream_idle_timeout": stream_idle_timeout,
+            "content_start_timeout": content_start_timeout,
+            "wire_controls": wire_controls,
         },
         "reasoning_chars": len(str(message.get("reasoning_content") or "")),
         "content_chars": len(content),

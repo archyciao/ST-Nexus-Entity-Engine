@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:location:location_profile:0.1.0",
+  "title": "LocationProfileComponent 0.1.0",
+  "description": "保存 Location 的稳定空间定义、用途和尺度，不保存临时天气或当前占领状态。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "location_kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "primary_functions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true, "maxItems": 24 },
+            "scale_description": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "spatial_characteristics": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 800 }, "uniqueItems": true, "maxItems": 32 }
+          },
+          "required": ["location_kind", "primary_functions", "scale_description", "spatial_characteristics"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:location:parent_location_reference:0.1.0",
+  "title": "ParentLocationReferenceComponent 0.1.0",
+  "description": "保存 Location 的直接物理父地点引用。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "parent_location_ref": {
+              "allOf": [
+                { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                { "type": "object", "properties": { "type": { "const": "location" } } }
+              ]
+            }
+          },
+          "required": ["parent_location_ref"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

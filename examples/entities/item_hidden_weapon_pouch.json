@@ -1,0 +1,63 @@
+{
+  "id": "item_01K2ABCDEFGHJKMNPQRSTV0401",
+  "type": "item",
+  "description": "黑布暗器囊是一只便于贴身携带的小型软袋，设有隐蔽内层，可分隔存放多枚轻小暗器。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-08-05T10:00:00+08:00",
+        "updated_at": "2026-08-05T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {"primary_name": "黑布暗器囊", "aliases": ["暗器囊"]}
+    },
+    "item_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "item_kind": "container_pouch",
+        "instance_mode": "individual",
+        "primary_functions": ["贴身携带暗器", "分隔收纳轻小物品"],
+        "materials": ["黑色厚布"],
+        "form_description": "软袋分为外层与隐蔽内层，可系在腰间。"
+      }
+    },
+    "item_characteristic": {
+      "schema_version": "0.1.0",
+      "data": {
+        "appearance_and_sensory": ["外表朴素无纹", "布料摩擦声很轻"],
+        "craftsmanship": "针脚细密，内层分隔便于盲取。",
+        "typical_behavior": ["贴身系紧时不易晃动"],
+        "symbolic_meanings": []
+      }
+    },
+    "item_state": {
+      "schema_version": "0.1.0",
+      "data": {
+        "states": [
+          {
+            "item_state_id": "item_state_01K2ABCDEFGHJKMNPQRSTV0402",
+            "kind": "condition",
+            "description": "袋口和系带保持完好。",
+            "status": "active"
+          }
+        ]
+      }
+    },
+    "container_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "capacity_description": "适合容纳数十枚飞针、铜钱镖等轻小物品。",
+        "allowed_contents": ["飞针", "铜钱镖", "药丸"],
+        "forbidden_contents": ["长兵器", "大型硬物"],
+        "stable_capabilities": ["分层收纳", "贴身隐藏"],
+        "access_requirements": ["需解开袋口系绳"]
+      }
+    }
+  }
+}

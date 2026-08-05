@@ -117,7 +117,7 @@
         }
       }
     },
-    "inventory_reference": {
+    "inventory_index": {
       "schema_version": "0.1.0",
       "data": {
         "item_refs": [
@@ -132,7 +132,7 @@
       }
     },
     "skill_reference": {
-      "schema_version": "0.1.0",
+      "schema_version": "0.2.0",
       "data": {
         "skill_refs": [
           {
@@ -140,7 +140,16 @@
               "id": "skill_01K2ABCDEFGHJKMNPQRSTV000E",
               "type": "skill"
             },
-            "proficiency_description": "已经掌握核心剑理，临敌应变极强，但仍缺乏对部分高深变化的长期沉淀。"
+            "proficiency_description": "已经掌握核心剑理，临敌应变极强，但仍缺乏对部分高深变化的长期沉淀。",
+            "stage_state": {
+              "evaluation_mode": "semantic",
+              "framework_ref": {
+                "id": "skill_01K2ABCDEFGHJKMNPQRSTV000E",
+                "type": "skill"
+              },
+              "current_stage_id": "skill_stage_01K2ABCDEFGHJKMNPQRSTV0604",
+              "numeric_values": []
+            }
           }
         ]
       }

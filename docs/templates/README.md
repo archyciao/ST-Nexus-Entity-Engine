@@ -13,8 +13,9 @@
 - EntityID模块_说明模板.py：说明 `type_series` ID 的系统生成方式、校验边界和上层调用顺序。
 - Entity校验模块_说明模板.py：说明单个 Component 校验之后如何执行完整 Entity 的跨组件一致性检查。
 - Entity网络模块_说明模板.py：说明多个 Entity 的目标校验、反向索引重建和权威方向。
-- Entity网络样例_说明模板.jsonc：说明 Character、Location、Event、Memory 与 Relation 封闭测试样例的引用结构。
+- Entity网络样例_说明模板.jsonc：说明 Character、Location、Item、Event、Memory 与 Relation 封闭测试样例的引用结构，并展示 Event 相关对象的反向历史索引。
 - AIRP三路提取测试工具_说明模板.py：说明 Event、Memory、其他 Entity 同批并发、固定汇合、失败恢复和单文件证据归档。
+- OpenCode关闭思考诊断工具_说明模板.py：说明极短参数诊断、双字段关闭、流式统计和敏感信息边界。
 
 ## 说明层级
 

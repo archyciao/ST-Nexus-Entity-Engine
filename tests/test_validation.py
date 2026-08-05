@@ -39,6 +39,10 @@ class ComponentSchemaTests(unittest.TestCase):
                 "event_location_reference",
                 "examples/valid/event_location_reference.json",
             ),
+            (
+                "event_related_entity_reference",
+                "examples/valid/event_related_entity_reference.json",
+            ),
         ]
         for component, path in cases:
             with self.subTest(component=component):
@@ -339,6 +343,25 @@ class ComponentSchemaTests(unittest.TestCase):
                 role="ai",
                 operation="propose",
                 path="/data/location_refs/0/location_roles",
+            )
+        )
+
+    def test_event_related_entity_type_is_system_controlled(self) -> None:
+        """AI 可提出对象作用，但正式 Entity Type 由系统写入。"""
+
+        denied = self.validator.check_permission(
+            "event_related_entity_reference",
+            role="ai",
+            operation="propose",
+            path="/data/related_entity_refs/0/related_entity_ref/type",
+        )
+        self.assertEqual("PERMISSION_DENIED", denied["code"])
+        self.assertIsNone(
+            self.validator.check_permission(
+                "event_related_entity_reference",
+                role="ai",
+                operation="propose",
+                path="/data/related_entity_refs/0/involvement_roles",
             )
         )
 

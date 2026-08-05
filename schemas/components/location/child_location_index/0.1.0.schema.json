@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:location:child_location_index:0.1.0",
+  "title": "ChildLocationIndexComponent 0.1.0",
+  "description": "从子 Location 的 ParentLocationReference 重建直接子地点目录。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "location_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                  { "type": "object", "properties": { "type": { "const": "location" } } }
+                ]
+              }
+            }
+          },
+          "required": ["location_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -45,6 +45,20 @@ class EntityIDTests(unittest.TestCase):
             "preference",
             "objective",
             "relation_aspect",
+            "location_state",
+            "item_state",
+            "organization_role",
+            "organization_direction",
+            "organization_state",
+            "skill_mechanic",
+            "skill_requirement",
+            "skill_numeric_binding",
+            "skill_stage",
+            "skill_stage_context",
+            "concept_rule",
+            "stage_numeric_binding",
+            "concept_stage",
+            "concept_stage_context",
         ):
             with self.subTest(kind=kind):
                 local_id = new_local_id(kind)
