@@ -13,7 +13,7 @@
         "data": {
           "type": "object",
           "properties": {
-            "location_kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "location_kind": { "type": "string", "minLength": 1, "maxLength": 120 },
             "primary_functions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true, "maxItems": 24 },
             "scale_description": { "type": "string", "minLength": 1, "maxLength": 1000 },
             "spatial_characteristics": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 800 }, "uniqueItems": true, "maxItems": 32 }

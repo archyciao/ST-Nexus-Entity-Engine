@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:world-simulator:schema:component:event:event_related_entity_reference:0.1.0",
   "title": "EventRelatedEntityReferenceComponent 0.1.0",
-  "description": "保存当前 Event 实际涉及的 Item、Organization、Skill 与 Concept 权威引用。",
+  "description": "保存与当前 Event 事实有关的 World Entity 引用，不推断其是否实际参与。",
   "allOf": [
     {
       "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
@@ -19,42 +19,23 @@
               "type": "array",
               "minItems": 1,
               "maxItems": 256,
+              "uniqueItems": true,
               "items": {
-                "type": "object",
-                "properties": {
-                  "related_entity_ref": {
-                    "allOf": [
-                      {
-                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": {
-                            "enum": ["item", "organization", "skill", "concept"]
-                          }
-                        }
-                      }
-                    ]
+                "allOf": [
+                  {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
                   },
-                  "involvement_roles": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 12,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 100,
-                      "pattern": "^[a-z][a-z0-9_]*$"
-                    },
-                    "description": "目标对象在本 Event 中的实际作用；第一版至少可使用 involved。"
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "enum": ["character", "location", "item", "organization", "skill", "concept", "character_relation"]
+                      }
+                    }
                   }
-                },
-                "required": ["related_entity_ref", "involvement_roles"],
-                "additionalProperties": false
+                ]
               },
-              "description": "同一目标 Entity 只出现一次，全部作用集中在同一项。"
+              "description": "同一目标 Entity 只出现一次；该引用只表示 Event 中存在与它有关的可召回事实。"
             }
           },
           "required": ["related_entity_refs"],

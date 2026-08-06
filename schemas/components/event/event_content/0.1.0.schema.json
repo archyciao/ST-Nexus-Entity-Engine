@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:event:event_content:0.1.0",
+  "title": "EventContentComponent 0.1.0",
+  "description": "保存 Event 的当前阶段、客观故事摘要和少量回忆特写。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": ["forming", "pending_finalization", "finalized"],
+              "description": "Event 在连续整理窗口中的当前阶段。"
+            },
+            "story_summary": {
+              "type": "string",
+              "minLength": 1,
+              "description": "能独立说明主要人物、来由、行动、因果、重要物品及结果或未决事项的客观故事梗概。"
+            },
+            "key_details": {
+              "type": "array",
+              "uniqueItems": true,
+              "description": "供回忆闪回使用的少量关键言语或动作；常规召回仍受独立预算限制。",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "detail_id": {
+                    "type": "string",
+                    "pattern": "^event_detail_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                  },
+                  "kind": { "enum": ["statement", "action"] },
+                  "content": { "type": "string", "minLength": 1 },
+                  "fidelity": {
+                    "enum": ["verbatim", "paraphrase"],
+                    "description": "防止把忠实转述误当作逐字原话。"
+                  },
+                  "actor_ref": {
+                    "allOf": [
+                      { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                      {
+                        "type": "object",
+                        "properties": { "type": { "const": "character" } }
+                      }
+                    ]
+                  }
+                },
+                "required": ["detail_id", "kind", "content", "fidelity"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["status", "story_summary", "key_details"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

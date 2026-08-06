@@ -184,11 +184,8 @@
       "data": {
         "event_refs": [
           {
-            "event_ref": {
-              "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
-              "type": "event"
-            },
-            "index_roles": ["important"]
+            "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+            "type": "event"
           }
         ]
       }

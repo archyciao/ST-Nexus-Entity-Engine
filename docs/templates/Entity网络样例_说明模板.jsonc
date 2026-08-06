@@ -1,7 +1,7 @@
 {
   // 一、文件级总览
   // 文件功能：说明封闭网络测试样例的组织方式；正式测试数据保存在 examples/networks。
-  // 这里的 Event 和 Memory 只展示已稳定的引用层，不代表其正文 Schema 已冻结。
+  // Event 展示召回正文与引用层；Memory 当前以根 Description 保存主观内容，并用组件连接 Owner 与来源 Event。
   "fixture_purpose": "本样例要验证的关系",
   // 二、结构级说明
   // entities 是同一次封闭校验中可互相解析的完整目标集合；缺少被引用目标会直接失败。
@@ -45,8 +45,24 @@
     {
       "id": "event_<系统生成序号>",
       "type": "event",
-      "description": "已经发生的客观经历摘要",
+      "description": "用于快速定位和检索的一两句 Event 说明",
       "components": {
+        // Event 正文只保存召回需要的状态、故事摘要和少量特写；不保存标题、提示词、原回复或后台原文。
+        "event_content": {
+          "schema_version": "0.1.0",
+          "data": {
+            "status": "pending_finalization",
+            "story_summary": "该 Event 的客观故事梗概",
+            "key_details": [
+              {
+                "detail_id": "event_detail_<系统生成序号>",
+                "kind": "statement",
+                "content": "一条关键言语或动作",
+                "fidelity": "paraphrase"
+              }
+            ]
+          }
+        },
         // 时间只保留叙事已有表达和精度。
         "event_time": {
           "schema_version": "0.1.0",
@@ -61,33 +77,18 @@
             "location_refs": [
               {
                 "location_ref": { "id": "location_<系统生成序号>", "type": "location" },
-                "location_roles": ["primary"],
                 "sequence": 0
               }
             ]
           }
         },
-        // Event 直接保存参与 Character；Character HistoryIndex 是反向派生目录。
-        "event_participant_reference": {
-          "schema_version": "0.1.0",
-          "data": {
-            "participant_refs": [
-              {
-                "participant_ref": { "id": "character_<系统生成序号>", "type": "character" },
-                "participation_roles": ["actor"]
-              }
-            ]
-          }
-        },
-        // 物品、组织、技能和概念使用同一相关对象组件；正式 ID、去重和反向 HistoryIndex 由脚本处理。
+        // 与 Event 事实有关的 Entity 使用直接引用；不分类是否在场或参与。
         "event_related_entity_reference": {
           "schema_version": "0.1.0",
           "data": {
             "related_entity_refs": [
-              {
-                "related_entity_ref": { "id": "item_<系统生成序号>", "type": "item" },
-                "involvement_roles": ["used"]
-              }
+              { "id": "character_<系统生成序号>", "type": "character" },
+              { "id": "item_<系统生成序号>", "type": "item" }
             ]
           }
         }

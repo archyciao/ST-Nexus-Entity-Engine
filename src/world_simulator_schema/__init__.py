@@ -18,6 +18,7 @@ from .entity_network import (
     rebuild_derived_indexes,
 )
 from .entity_validator import EntityValidationReport, EntityValidator
+from .event_context import build_event_recall_pack
 from .stage_context import (
     StageContextError,
     StageIssue,
@@ -39,6 +40,7 @@ __all__ = [
     "StageIssue",
     "ValidationReport",
     "build_stage_context",
+    "build_event_recall_pack",
     "is_valid_entity_id",
     "is_valid_local_id",
     "new_entity_id",

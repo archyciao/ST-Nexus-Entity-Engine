@@ -156,7 +156,6 @@ def _validate_character_relation(components: dict[str, Any]) -> list[dict[str, s
         "relation_endpoint_reference",
         "character_relation_aspects",
         "character_relation_state",
-        "history_index",
     }
     for component_name in sorted(required - components.keys()):
         errors.append(

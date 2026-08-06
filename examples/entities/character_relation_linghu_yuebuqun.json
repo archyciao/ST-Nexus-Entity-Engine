@@ -155,18 +155,12 @@
       "data": {
         "event_refs": [
           {
-            "event_ref": {
-              "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
-              "type": "event"
-            },
-            "index_roles": ["important", "aspect_started"]
+            "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+            "type": "event"
           },
           {
-            "event_ref": {
-              "id": "event_01K2ABCDEFGHJKMNPQRSTV0012",
-              "type": "event"
-            },
-            "index_roles": ["state_changed", "turning_point"]
+            "id": "event_01K2ABCDEFGHJKMNPQRSTV0012",
+            "type": "event"
           }
         ]
       }

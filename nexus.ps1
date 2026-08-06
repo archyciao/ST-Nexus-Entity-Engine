@@ -142,15 +142,18 @@ if ($uvAvailable) {
 
 switch ($Action) {
     "test" {
-        $commandArgs = @("-m", "unittest", "discover", "-s", "tests", "-v") + $ActionArgs
+        $commandArgs = @("-m", "unittest", "discover", "-s", "tests", "-p", "test*.py", "-v")
     }
     "check-registry" {
-        $commandArgs = @("-m", "world_simulator_schema.cli", "check-registry") + $ActionArgs
+        $commandArgs = @("-m", "world_simulator_schema.cli", "check-registry")
     }
     "python" {
-        $commandArgs = $ActionArgs
+        $commandArgs = @()
     }
 }
+
+$forwardArgs = @($ActionArgs | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+$commandArgs = @($commandArgs) + $forwardArgs
 
 if ($uvAvailable) {
     Invoke-Uv -Arguments ($runner + $commandArgs)

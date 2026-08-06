@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 from difflib import SequenceMatcher
+import hashlib
 import html
 import json
 import os
@@ -84,99 +85,71 @@ LOCATION_ROLES = {"primary", "start", "transit", "end"}
 INVENTORY_ROLES = {"carried", "equipped", "worn"}
 VISIBILITIES = {"public", "private", "secret"}
 SNAKE_CASE_RE = re.compile(r"^[a-z][a-z0-9_]*$")
-EVENT_MERGE_REASON_CODES = {
-    "same_unfinished_activity",
-    "direct_aftermath",
+BOUNDARY_DECISIONS = {"continue", "new_event", "unresolved"}
+BOUNDARY_BASIS_CODES = {
+    "same_immediate_activity",
+    "same_question_response",
+    "distinct_local_activity",
+    "distinct_interaction",
+    "scene_change_with_distinct_activity",
+    "insufficient_context",
 }
+SOURCE_VIEW_VERSION = 1
 
 
 EVENT_ATTENTION_GUIDE = """
-脚本已把相邻完整回合之间的候选交界默认保留。后一块仍在完成前块尚未结束的同一现场行动，
-或主要补全其直接结果时，可把对应 candidate_id 写入 boundary_merges；前块已有结果，或转场后
-开始新的行动、互动或因果问题时，保留交界。长期目标、人物相同或因果连续可作背景，不单独
-决定合并。merge_policy 为 defer_until_later_context 的交界本批保留，不列入 boundary_merges；
-它不是永久边界，后续上下文证明仍属同一 Event 时可由待定窗口重组。
-
-若新 Event 明确从同一消息内部开始，用 additional_starts 定位；其余分段、slot 编号和原文范围
-由脚本生成。event_updates 使用脚本输入中的 block_id，延续旧生成中时使用
-existing_forming_tail，消息内新增起点使用对应 start_id。返回各 Event 的完整 title、description
-和本批事实增量，覆盖有实际作用的人物、行动、因果、物品、结果与未决事项。直接输出 JSON。
+先把正文作为一段连续故事完整读完，再按发生顺序整理 Event。边界放在前一段经历已有阶段落点、
+后文已经展开另一段可单独回忆的经历之处；人物说完一句话、一次问答中的追问、单个动作或段落
+换行都不因此单列。不要用长期目标把数段已经各自展开的经历概括成一项。
 """.strip()
 
 
 EVENT_SYSTEM_PROMPT = f"""
-你负责一次完成连续 AIRP 叙事的客观 Event 分段和内容更新。Event 是可独立命名、
-理解、检索和回忆的小故事单元，不等于回合，也不等于长期目标。当前采用“局部经历”
-粒度：一个长期目标或宏观阶段可以包含若干 Event；每项 Event 可以包含形成同一局部结果
-所需的起因、过程、结果和直接余波。
+你把一段连续 AIRP 叙事整理成便于以后理解、检索和回忆的客观 Event。输入正文已经去掉回合、
+消息和场景标题等技术分段，应先把它作为故事完整读完。每项 Event 是一段能够单独回忆的经历，
+摘要要写清主要人物、触发或来由、行动与回应、关键因果、重要物品或命令，以及结果或当前未决事项。
 
-相关 Entity、source_blocks、boundary_candidates 和脚本预检清单只用于缩小判断范围、
-身份消歧、来源核对和防漏，不能覆盖或补写原文。脚本先保留候选交界；模型只撤销符合
-合并条件的交界，正式分段、slot 编号和原文裁切由脚本完成。不要展示分析过程。
+读完故事后再留意边界。前一段经历已有阶段落点，后文又实际展开另一段可单独回忆的经历时，
+后文另列 Event。共同人物、地点、长期目标或因果联系不要求合并；换行、一次问答中的往返、
+说话人变化或单个动作也不要求拆分。边界可以落在同一段 AI 正文内部。
 
-普通边界只能出现在本批新增消息中，不能回到已处理旧消息内部重新切分。同一消息
-先收尾旧 Event、再开始新 Event 时，用新 Event 的原文开头定位。结果后的直接余波
-可以留在原 Event。old_forming_disposition 只能是：
-- absent：首次整理，没有旧 Event；
-- keep_distinct：旧生成中仍是独立 Event，本批继续它，必要时再开启新 Event；
-- merge_into_pending：旧生成中全部是待定稿余波，固定脚本将整体合并；新边界在本批中。
+反面示例只说明明显错误，不是数量模板：
+- 过细：同一次询问中，把发问、回答、追问和作出决定分别写成四项 Event；
+- 过粗：把结束战斗、押送俘虏、接受新任务和再次启程写成一项 Event，只因它们前后存在因果。
 
-每个受影响 Event 都返回截至本批结束的完整 title、description，并返回本批新增事实段：
-- description 用一至两句客观文字写清主要人物、情境、局部行动和结果或当前落点，便于
-  快速定位和向量检索；理想为六十至一百二十个汉字，超过一百六十字只记软性提示，不为长度重试；
-- event_beats_add 是本批新增的客观事实段，每段保留来源，覆盖有实际作用的出场人物、
-  行动或转折、直接因果、重要物品或命令、结果或明确未决事项；按叙事顺序写，避免同义重复；
-- title、description 是完整替换稿，必须保留仍有效的旧事实；其他数组只返回本批增删量；
-- 运行中的保真故事稿由固定脚本按来源移动、去重并拼接 event_beats，模型无需重写完整摘要；
-- 关键言语必须是原话，关键动作必须是适合回忆闪回的原文特写。只返回本批新候选；
-  默认每项 Event 最重要的三条，零至两条也可以，通常不超过五条，不解释、不凑数；
-- 若旧特写确实误归或不再值得保留，只把其 id 放入 retire_detail_ids；其余旧特写无需重发。
+先写 story_summary_add，再从完整故事中提炼 description：
+- story_summary_add 是本批分给该 Event 的新增故事正文，按实际信息量写全，不设硬字数；
+- description 是短检索入口，用一两句客观文字概括人物、情境、主要行动和结果或当前落点；
+- title 和 description 对已有 Event 返回完整最新版，story_summary_add 不重复旧摘要；
+- new_key_details 返回最有回忆价值的零至五条关键言语或动作。引号内使用原话，忠实转述不加引号；
+  不说明选择过程，不为数量凑条目。
 
-Event 不再枚举参与者、地点和相关 Entity；这些对象由独立 Entity 任务提取一次，再由固定脚本
-按同一来源片段挂接。正式 ID、状态流转、合并、去重、Memory 换绑和索引也由固定脚本处理。
+脚本负责来源定位、时间地点提取、明确场景硬边界、正式编号、状态流转、合并、Memory 换绑和索引。
+start_quote 从本批正文逐字复制该 Event 开头的一小段，供脚本找回原文位置。首项若延续上一生成中
+Event，continues_previous 填 true；其余填 false。old_forming_disposition：首次整理用 absent；旧生成中
+保持独立用 keep_distinct；确认旧生成中应整体并入待定稿时用 merge_into_pending。
 
 只输出一个 JSON 对象，不输出解释或分析：
 {{
   "old_forming_disposition": "absent | keep_distinct | merge_into_pending",
-  "boundary_merges": [{{
-    "candidate_id": "脚本给出的候选交界编号",
-    "reason_code": "same_unfinished_activity | direct_aftermath"
-  }}],
-  "additional_starts": [{{
-    "start_id": "inside_1 | inside_2 ...",
-    "source_ref": "新 Event 开头所在消息",
-    "start_quote": "该消息中的开头原文短引"
-  }}],
   "event_updates": [{{
-    "partition_key": "existing_forming_tail | round_0001 | inside_1 ...",
+    "start_quote": "从本批正文逐字复制的 Event 开头",
+    "continues_previous": false,
     "title": "简短标题",
-    "description": "完整检索说明",
-    "event_beats_add": [{{
-      "content": "本批新增的客观事实段",
-      "source_refs": ["本批消息引用"]
-    }}],
-    "event_time": {{
-      "start_time": {{"expression": "原文时间表达", "precision": "exact | approximate"}},
-      "end_time": {{"expression": "原文时间表达", "precision": "exact | approximate"}}
-    }},
-    "unresolved_add": [],
-    "unresolved_resolve": [],
-    "retire_detail_ids": [],
+    "story_summary_add": "本批新增故事摘要",
+    "description": "短检索说明",
     "new_key_details": [{{
       "kind": "statement | action",
-      "content": "原话或动作原文特写",
-      "actor_key": "character:主要名称；不适用则空字符串",
-      "source_refs": ["本批消息引用"]
+      "content": "简短原话或忠实转述；转述不用引号",
+      "actor_key": "character:主要名称；不适用则空字符串"
     }}]
   }}]
 }}
 
-event_time 没有叙事依据时填 null；形成中的 Event 没有结束时间时省略 end_time。
-boundary_merges 只列需要撤销的候选交界；保留的候选无需重发。additional_starts 没有内容时
-返回空数组。merge_policy 为 defer_until_later_context 的候选本批不可撤销。每个脚本生成的
-partition_key 在 event_updates 中出现一次；撤销交界后，合并组只用最左侧 partition_key
-返回一项覆盖整个合并组的更新。event_updates 只列最终分段中获得本批来源的 partition_key；
-若首个候选交界保留，不要为 existing_forming_tail 返回空更新。
+event_updates 按故事发生顺序排列；同一 Event 在本批只返回一项。若本批首项已经是另一段故事，
+不要为旧生成中返回空更新。时间、地点、来源编号和候选边界不由你返回。
+
+{EVENT_ATTENTION_GUIDE}
 """.strip()
 
 
@@ -302,12 +275,13 @@ Character 省略 domain_data_patch，非 Character 省略 character_data_patch�
 
 
 def initial_unified_state() -> dict[str, Any]:
-    """建立兼容旧 Event 状态机并可累积全部候选的运行状态。"""
+    """建立 Event 三状态、原文证据表和全部 Entity 候选的运行状态。"""
 
     state = initial_state()
-    state["next_beat_number"] = 1
     state.update(
         {
+            "source_records": {},
+            "boundary_workspace": [],
             "entity_candidates": {},
             "relation_candidates": {},
             "id_maps": {
@@ -317,7 +291,6 @@ def initial_unified_state() -> dict[str, Any]:
                 "relation": {},
                 "local": {},
             },
-            "warnings": [],
             "run_timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
@@ -356,101 +329,21 @@ def _unique(values: Iterable[Any]) -> list[Any]:
     return result
 
 
-def _ensure_event_beats(state: dict[str, Any]) -> None:
-    """兼容旧检查点：把既有故事稿保留成一个带来源的事实段。"""
-
-    state.setdefault("next_beat_number", 1)
-    for event in state.get("events", []):
-        event.setdefault("event_beats", [])
-        if event["event_beats"] or not str(event.get("story_summary", "")).strip():
-            continue
-        event["event_beats"] = [
-            {
-                "id": f"beat_legacy_{event.get('id', 'unknown')}",
-                "content": str(event["story_summary"]).strip(),
-                "source_refs": list(event.get("source_refs", [])),
-            }
-        ]
-
-
-def _beat_signature(beat: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
-    return (
-        normalize_anchor(str(beat.get("content", "")).strip()),
-        tuple(sorted({str(ref) for ref in _as_list(beat.get("source_refs"))})),
-    )
-
-
-def _merge_event_beats(
-    existing: Iterable[dict[str, Any]], incoming: Iterable[dict[str, Any]]
-) -> list[dict[str, Any]]:
-    """按“内容 + 来源”去重并保持叙事顺序。"""
-
-    result: list[dict[str, Any]] = []
-    signatures: set[tuple[str, tuple[str, ...]]] = set()
-    for raw in [*existing, *incoming]:
-        if not isinstance(raw, dict):
-            continue
-        beat = deepcopy(raw)
-        signature = _beat_signature(beat)
-        if not signature[0] or signature in signatures:
-            continue
-        signatures.add(signature)
-        result.append(beat)
-    return result
-
-
-def _carry_merged_event_beats(
-    boundary_state: dict[str, Any],
-    source_state: dict[str, Any],
-    plan: dict[str, Any],
-    slot_event_ids: dict[str, str],
-) -> None:
-    """旧生成中并入待定稿时，由脚本整体迁移事实段。"""
-
-    if plan.get("old_forming_disposition") != "merge_into_pending":
-        return
-    pending = next(
-        (
-            event
-            for event in source_state.get("events", [])
-            if event.get("status") == "pending_finalization"
-        ),
-        None,
-    )
-    forming = next(
-        (
-            event
-            for event in source_state.get("events", [])
-            if event.get("status") == "forming"
-        ),
-        None,
-    )
-    target_id = slot_event_ids.get("pending_tail")
-    target = next(
-        (event for event in boundary_state.get("events", []) if event.get("id") == target_id),
-        None,
-    )
-    if pending is None or forming is None or target is None:
-        return
-    target["event_beats"] = _merge_event_beats(
-        pending.get("event_beats", []), forming.get("event_beats", [])
-    )
-
-
-def _append_warning(state: dict[str, Any], warning: str) -> None:
-    if warning not in state["warnings"]:
-        state["warnings"].append(warning)
-
-
 def related_entity_context(
-    state: dict[str, Any], rounds: list[dict[str, Any]] | None = None, limit: int = 24
+    state: dict[str, Any],
+    rounds: list[dict[str, Any]] | None = None,
+    limit: int = 24,
+    *,
+    assistant_only: bool = False,
 ) -> dict[str, Any]:
     """只加载本批直接提及和尾部相关候选，避免世界越大、提示词越无限增长。"""
 
-    narrative = "\n".join(
-        message["content"]
-        for message in batch_messages(rounds or [])
+    messages = (
+        event_source_messages(rounds or [])
+        if assistant_only
+        else batch_messages(rounds or [])
     )
+    narrative = "\n".join(message["content"] for message in messages)
     tail_keys: set[str] = set()
     for event in state.get("events", [])[-2:]:
         tail_keys.update(event.get("participants", []))
@@ -503,6 +396,279 @@ def related_entity_context(
 
 
 SCENE_HEADER_RE = re.compile(r"^\[(?:场景时间|时间)[^\n\]]*\]", re.MULTILINE)
+SOURCE_UNIT_END_RE = re.compile(r"[。！？!?](?:[”’」』】）)]*)|\n+")
+QUOTED_OR_THOUGHT_RE = re.compile(
+    r"“[^”]*”|‘[^’]*’|\"[^\"]*\"|'[^']*'|\*[^*]+\*",
+    re.DOTALL,
+)
+NON_ACTUAL_TRANSITION_RE = re.compile(
+    r"(?:回忆|想起|忆起|忆及|梦见|曾经|当年|从前|听说|提到|讲述|假如|如果|若是|"
+    r"是否|能否|可以|可能|准备|打算|计划|想要|尚未|并未|没有|不曾|不要)"
+)
+HARD_AERIAL_DEPARTURE_RE = re.compile(
+    r"(?:冲天而起|离地升空|腾空而起|御空离开|破空而去|化作.{0,12}遁光.{0,20}(?:飞离|疾驰|远去)|"
+    r"遁光.{0,16}(?:冲天|升空|飞离|破空))"
+)
+HARD_AERIAL_SCENE_RE = re.compile(
+    r"(?:苍穹|高空|云海|万丈高空|罡风|御空|遁光.{0,20}(?:飞行|疾驰|穿行))"
+)
+BODY_TIME_RE = re.compile(
+    r"(?:天元|公元|纪元)\s*\d{1,4}年(?:\d{1,2}月\d{1,2}日)?"
+    r"(?:[·，,\s]*(?:星期[一二三四五六日天]))?(?:[·，,\s]*(?:子|丑|寅|卯|辰|巳|午|未|申|酉|戌|亥)时(?:初刻|一刻|二刻|三刻|末刻)?)?"
+    r"|(?:翌日|次日|明日|今日|当日)?(?:子|丑|寅|卯|辰|巳|午|未|申|酉|戌|亥)时(?:初刻|一刻|二刻|三刻|末刻)?"
+    r"|(?:正午|午后|傍晚|黄昏|清晨|黎明|深夜)"
+)
+BODY_LOCATION_RE = re.compile(
+    r"(?:抵达|到达|进入|来到|回到|返回|走入|走进|踏入|身处|位于|落在|降落在|飞至|御空来到)"
+    r"(?:了|至|到|于)?[‘’“”\"'\s]*"
+    r"(?P<place>[\u4e00-\u9fffA-Za-z0-9·]{1,28}?(?:驿站|山门|宗门|剑庐|府邸|城镇|村落|院落|"
+    r"房间|石屋|洞府|住处|客栈|营地|广场|试剑台|藏经阁|问道峰|高空|苍穹|云海))"
+)
+INTERNAL_START_CLUES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "arrival_transition",
+        re.compile(
+            r"(?:遁光|飞舟|飞剑|马车|坐骑).{0,20}(?:开始|逐渐|缓缓)?(?:下降|落地|停下)"
+            r"|(?:抵达|到达|回到).{0,20}(?:山门|宗门|剑庐|府邸|城镇|村落|院落|房间|石屋|洞府|住处|客栈|营地|广场)"
+        ),
+    ),
+    (
+        "completed_scene_exit",
+        re.compile(
+            r"(?:推开|拉开|打开).{0,8}(?:门|窗).{0,16}(?:走出|离开)"
+            r"|(?:走出|离开).{0,16}(?:房间|石屋|住处|洞府|院落)"
+        ),
+    ),
+    (
+        "new_arrival_or_voice",
+        re.compile(
+            r"(?:门外|屋外|身后|远处|近处|小径上|门前).{0,32}"
+            r"(?:传来|响起|停下|出现).{0,24}(?:脚步|叩门|敲门|声音|嗓音|人影)"
+        ),
+    ),
+    (
+        "new_delivery_or_order",
+        re.compile(r"(?:奉.{0,16}之命|前来传令|前来送|送来|来报).{0,40}"),
+    ),
+    (
+        "interaction_entry",
+        re.compile(r"(?:笃[、，,]?笃|叩击声|敲门声).{0,40}"),
+    ),
+)
+HARD_ARRIVAL_DESTINATION_RE = re.compile(
+    r"(?:落在|降落|抵达|到达|进入|踏入|穿过).{0,96}"
+    r"(?:山门|宗门|剑庐|府邸|城镇|村落|院落|房间|石屋|洞府|住处|客栈|营地|广场)"
+)
+HARD_EXIT_ACTIVITY_RE = re.compile(
+    r"(?:四处|熟悉|游览|探索|前往|走向|观望|寻找|散步|巡看)"
+)
+HARD_ROUND_LOCATION_RESET_RE = re.compile(
+    r"(?:抵达|到达|回到|返回|进入|走进|入住|住进).{0,20}"
+    r"(?:房间|石屋|住处|洞府|客栈|营地|院落).{0,64}"
+    r"(?:盘腿|疗伤|调息|休息|安顿|闭关|入住|住下|投宿)"
+)
+HARD_ROUND_LOCATION_RESET_WITH_SCENE_RE = re.compile(
+    r"(?:抵达|到达|回到|返回|进入|走进|入住|住进).{0,20}"
+    r"(?:房间|石屋|住处|洞府|客栈|营地|院落).{0,64}(?:坐下|整理)"
+)
+HARD_LODGING_ENTRY_RE = re.compile(
+    r"(?:入住|住进|投宿(?:于)?).{0,20}(?:房间|石屋|住处|洞府|客栈|营地|院落)"
+)
+HARD_LOCATION_CONTINUATION_RE = re.compile(
+    r"(?:继续|接着|仍在|并未停下).{0,28}(?:赶路|追|逃|战|交手|厮杀|对话|回答|讲述|谈论)"
+)
+
+
+def event_source_messages(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Event 默认只读取 AI 正文；user 原文仍由来源表完整保存。"""
+
+    return [
+        message
+        for message in batch_messages(rounds)
+        if message.get("role") == "assistant"
+    ]
+
+
+def event_narrative_body(text: Any) -> str:
+    """生成模型看到的连续故事正文，移除宿主的结构化场景标题。"""
+
+    return SCENE_HEADER_RE.sub("", str(text)).strip()
+
+
+def event_narrative_text(rounds: list[dict[str, Any]]) -> str:
+    """把本批 AI 正文按顺序合成一篇故事，不暴露回合或消息分区。"""
+
+    return "\n\n".join(
+        body
+        for message in event_source_messages(rounds)
+        if (body := event_narrative_body(message.get("content", "")))
+    )
+
+
+def objective_narration(text: Any) -> str:
+    """供固定规则检查实际叙述；对白、内心与场景标题不作为动作证据。"""
+
+    without_header = event_narrative_body(text)
+    return QUOTED_OR_THOUGHT_RE.sub(" ", without_header)
+
+
+def actual_transition_match(pattern: re.Pattern[str], text: Any) -> re.Match[str] | None:
+    """关键词只是入口；排除对白、回忆、假设、计划、否定等非实际发生语境。"""
+
+    narrative = objective_narration(text)
+    for match in pattern.finditer(narrative):
+        prefix = narrative[max(0, match.start() - 28) : match.start()]
+        if NON_ACTUAL_TRANSITION_RE.search(prefix):
+            continue
+        return match
+    return None
+
+
+def _message_source_units(message: dict[str, Any]) -> list[dict[str, Any]]:
+    """把干净正文切成可稳定引用的小段；只编号，不概括、不改写。"""
+
+    text = str(message.get("content", ""))
+    ref = str(message.get("ref", ""))
+    units: list[dict[str, Any]] = []
+    start = 0
+    unit_number = 1
+    for match in SOURCE_UNIT_END_RE.finditer(text):
+        end = match.end()
+        raw = text[start:end]
+        leading = len(raw) - len(raw.lstrip())
+        trailing = len(raw.rstrip())
+        content = raw.strip()
+        if content:
+            units.append(
+                {
+                    "unit_ref": f"{ref}.u{unit_number:03d}",
+                    "source_ref": ref,
+                    "start": start + leading,
+                    "end": start + trailing,
+                    "content": content,
+                }
+            )
+            unit_number += 1
+        start = end
+    if start < len(text):
+        raw = text[start:]
+        leading = len(raw) - len(raw.lstrip())
+        content = raw.strip()
+        if content:
+            units.append(
+                {
+                    "unit_ref": f"{ref}.u{unit_number:03d}",
+                    "source_ref": ref,
+                    "start": start + leading,
+                    "end": start + len(raw.rstrip()),
+                    "content": content,
+                }
+            )
+    return units
+
+
+def event_prompt_messages(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Event 输入只保留一份干净正文；消息书签已足够支撑软性特写。"""
+
+    result: list[dict[str, Any]] = []
+    for message in batch_messages(rounds):
+        result.append(
+            {
+                "ref": message["ref"],
+                "role": message["role"],
+                "speaker": message["speaker"],
+                "content": message["content"],
+            }
+        )
+    return result
+
+
+def normalized_source_records(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """生成消息级干净原文表；句子切分只在当批计算，不持久化。"""
+
+    records: list[dict[str, Any]] = []
+    for message in batch_messages(rounds):
+        content = str(message.get("content", ""))
+        records.append(
+            {
+                "source_ref": str(message["ref"]),
+                "view_version": SOURCE_VIEW_VERSION,
+                "role": str(message["role"]),
+                "speaker": str(message["speaker"]),
+                "source_line": int(message["source_line"]),
+                "content": content,
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            }
+        )
+    return records
+
+
+def append_source_records(
+    state: dict[str, Any], rounds: list[dict[str, Any]]
+) -> list[str]:
+    """幂等写入原文记录；同一书签正文变化时拒绝静默覆盖。"""
+
+    records = state.setdefault("source_records", {})
+    warnings: list[str] = []
+    for record in normalized_source_records(rounds):
+        ref = str(record["source_ref"])
+        existing = records.get(ref)
+        if existing is None:
+            records[ref] = record
+            continue
+        if existing.get("content_sha256") != record.get("content_sha256"):
+            warnings.append(f"来源 {ref} 的正文指纹发生变化；保留旧版本并等待显式迁移")
+    return warnings
+
+
+def event_internal_start_candidates(
+    rounds: list[dict[str, Any]],
+    *,
+    assistant_only: bool = False,
+) -> list[dict[str, Any]]:
+    """用保守规则标出消息内新互动入口；候选不是自动边界。"""
+
+    candidates: list[dict[str, Any]] = []
+    messages = event_source_messages(rounds) if assistant_only else batch_messages(rounds)
+    for message in messages:
+        units = _message_source_units(message)
+        for unit_index, unit in enumerate(units[1:], start=1):
+            matched_kinds = [
+                kind for kind, pattern in INTERNAL_START_CLUES if pattern.search(unit["content"])
+            ]
+            if not matched_kinds:
+                continue
+            remaining_text = str(message.get("content", ""))[int(unit["start"]) :]
+            hard_reason = ""
+            if (
+                "arrival_transition" in matched_kinds
+                and actual_transition_match(HARD_ARRIVAL_DESTINATION_RE, remaining_text)
+                and not actual_transition_match(HARD_LOCATION_CONTINUATION_RE, remaining_text)
+            ):
+                hard_reason = "已开始抵达重要地点，且后文确认落地或进入该地点"
+            elif (
+                "completed_scene_exit" in matched_kinds
+                and actual_transition_match(HARD_EXIT_ACTIVITY_RE, remaining_text)
+            ):
+                hard_reason = "已离开当前室内地点，并开始新的外出事项"
+            candidates.append(
+                {
+                    "candidate_id": f"inside_{unit['unit_ref']}",
+                    "source_ref": unit["source_ref"],
+                    "source_unit_ref": unit["unit_ref"],
+                    "left_quote": _short_closing(units[unit_index - 1]["content"]),
+                    "start_quote": unit["content"][:72],
+                    "script_clues": matched_kinds,
+                    "hard_boundary": bool(hard_reason),
+                    "hard_reason": hard_reason,
+                    "nature": (
+                        "脚本硬边界；已完成重要地点转换并开始新事项"
+                        if hard_reason
+                        else "脚本注意力候选；不是自动边界"
+                    ),
+                }
+            )
+    return candidates
 
 
 def _scene_place(header: str) -> str:
@@ -525,6 +691,36 @@ def _scene_place(header: str) -> str:
     return "·".join(place_parts) if found_time_boundary else ""
 
 
+def _scene_time(header: str) -> str:
+    """从场景头保留原始时间表达；没有明确时间部分时返回空。"""
+
+    inner = str(header).strip().removeprefix("[").removesuffix("]")
+    _, separator, value = inner.partition("：")
+    if not separator:
+        return ""
+    parts = [part.strip() for part in value.split("·") if part.strip()]
+    for index, part in enumerate(parts):
+        if re.search(r"(?:^|\D)\d{1,4}年", part) or re.match(
+            r"^(?:天元|公元|纪元)\s*\d+", part
+        ):
+            return "·".join(parts[index:])
+    return ""
+
+
+def _body_time(text: Any) -> str:
+    """场景头缺失时，只从客观叙述中取明确时间；对白计划与回忆不采用。"""
+
+    match = BODY_TIME_RE.search(objective_narration(text))
+    return match.group(0).strip() if match else ""
+
+
+def _body_location(text: Any) -> str:
+    """场景头缺失时，保守提取已经实际到达或身处的地点。"""
+
+    match = actual_transition_match(BODY_LOCATION_RE, text)
+    return str(match.group("place")).strip() if match else ""
+
+
 def _short_opening(text: str, limit: int = 48) -> str:
     """生成只用于定位的紧凑开头，不替代正文。"""
 
@@ -537,12 +733,18 @@ def _short_closing(text: str, limit: int = 72) -> str:
     return re.sub(r"\s+", " ", str(text).strip())[-limit:]
 
 
-def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """按完整回合生成粗块，让模型只在少量交界处做语义判断。"""
+def event_source_blocks(
+    rounds: list[dict[str, Any]], *, assistant_only: bool = False
+) -> list[dict[str, Any]]:
+    """建立后台粗块；新协议只用 AI，旧记录仍可按完整回合恢复。"""
 
     blocks: list[dict[str, Any]] = []
     for round_item in rounds:
-        messages = batch_messages([round_item])
+        messages = (
+            event_source_messages([round_item])
+            if assistant_only
+            else batch_messages([round_item])
+        )
         scene_headers = [
             match.group(0)
             for message in messages
@@ -555,7 +757,7 @@ def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
             (
                 message
                 for message in messages
-                if str(message.get("content", "")).strip()
+                if event_narrative_body(message.get("content", ""))
             ),
             None,
         )
@@ -563,7 +765,7 @@ def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
             (
                 message
                 for message in reversed(messages)
-                if str(message.get("content", "")).strip()
+                if event_narrative_body(message.get("content", ""))
             ),
             None,
         )
@@ -575,7 +777,9 @@ def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "opening": (
                     {
                         "source_ref": str(opening_message["ref"]),
-                        "quote": _short_opening(opening_message["content"]),
+                        "quote": _short_opening(
+                            event_narrative_body(opening_message["content"])
+                        ),
                     }
                     if opening_message is not None
                     else None
@@ -583,12 +787,19 @@ def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "closing": (
                     {
                         "source_ref": str(closing_message["ref"]),
-                        "quote": _short_closing(closing_message["content"]),
+                        "quote": _short_closing(
+                            event_narrative_body(closing_message["content"])
+                        ),
                     }
                     if closing_message is not None
                     else None
                 ),
                 "scene_places": scene_places,
+                "narrative_text": "\n\n".join(
+                    event_narrative_body(message.get("content", ""))
+                    for message in messages
+                    if event_narrative_body(message.get("content", ""))
+                ),
             }
         )
     return blocks
@@ -597,28 +808,48 @@ def event_source_blocks(rounds: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def event_boundary_candidates(
     state: dict[str, Any], source_blocks: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    """列出默认保留的回合交界；模型只需指出哪些交界应合并。"""
+    """列出回合交界；只有双重客观信号才由脚本升级为硬边界。"""
 
     candidates: list[dict[str, Any]] = []
     has_forming = any(
         event.get("status") == "forming" for event in state.get("events", [])
     )
     for index, block in enumerate(source_blocks):
+        opening_quote = str((block.get("opening") or {}).get("quote", ""))
+        opening_narrative = str(block.get("narrative_text", ""))
         if index == 0:
             if has_forming:
+                hard_reason = (
+                    "已完成重要地点转换，并开始新的休整或安顿事项"
+                    if not actual_transition_match(
+                        HARD_LOCATION_CONTINUATION_RE, opening_narrative
+                    )
+                    and (
+                        actual_transition_match(
+                            HARD_ROUND_LOCATION_RESET_RE, opening_narrative
+                        )
+                        or actual_transition_match(
+                            HARD_LODGING_ENTRY_RE, opening_narrative
+                        )
+                    )
+                    else ""
+                )
                 candidates.append(
                     {
                         "candidate_id": f"before_{block['block_id']}",
                         "left": "existing_forming_tail",
                         "right": block["block_id"],
-                        "default_action": "keep_boundary",
-                        "merge_policy": "current_batch",
+                        "right_context": block.get("opening"),
+                        "fallback_action": "unresolved",
                         "script_clues": [],
+                        "hard_boundary": bool(hard_reason),
+                        "hard_reason": hard_reason,
                     }
                 )
             continue
 
         previous = source_blocks[index - 1]
+        previous_narrative = str(previous.get("narrative_text", ""))
         previous_places = _as_list(previous.get("scene_places"))
         current_places = _as_list(block.get("scene_places"))
         clues: list[dict[str, Any]] = []
@@ -630,34 +861,123 @@ def event_boundary_candidates(
                     "to": current_places[0],
                 }
             )
+        hard_reason = ""
+        if (
+            not actual_transition_match(
+                HARD_LOCATION_CONTINUATION_RE, opening_narrative
+            )
+            and (
+                actual_transition_match(
+                    HARD_ROUND_LOCATION_RESET_RE, opening_narrative
+                )
+                or actual_transition_match(
+                    HARD_LODGING_ENTRY_RE, opening_narrative
+                )
+                or (
+                    clues
+                    and actual_transition_match(
+                        HARD_ROUND_LOCATION_RESET_WITH_SCENE_RE, opening_narrative
+                    )
+                )
+            )
+        ):
+            hard_reason = "已完成重要地点转换，并开始新的休整或安顿事项"
+        elif (
+            actual_transition_match(HARD_AERIAL_DEPARTURE_RE, previous_narrative)
+            and actual_transition_match(HARD_AERIAL_SCENE_RE, opening_narrative)
+            and bool(clues)
+        ):
+            hard_reason = "已离开固定地点并进入新的御空旅程"
         candidates.append(
             {
                 "candidate_id": f"before_{block['block_id']}",
                 "left": previous["block_id"],
                 "right": block["block_id"],
-                "default_action": "keep_boundary",
-                "merge_policy": (
-                    "defer_until_later_context" if clues else "current_batch"
-                ),
+                "left_context": previous.get("closing"),
+                "right_context": block.get("opening"),
+                "fallback_action": "unresolved",
                 "script_clues": clues,
+                "hard_boundary": bool(hard_reason),
+                "hard_reason": hard_reason,
             }
         )
     return candidates
 
 
-def _boundary_merge_ids(plan: dict[str, Any]) -> list[str]:
-    """兼容对象或字符串形式，读取模型要求撤销的候选交界。"""
+def hard_event_starts(
+    state: dict[str, Any], rounds: list[dict[str, Any]], *, assistant_only: bool = False
+) -> list[dict[str, Any]]:
+    """列出由双重客观信号确认的少量硬起点，供提示与分区共用。"""
 
-    result: list[str] = []
-    for item in _as_list(plan.get("boundary_merges")):
-        candidate_id = (
-            str(item.get("candidate_id", "")).strip()
-            if isinstance(item, dict)
-            else str(item).strip()
+    source_blocks = event_source_blocks(rounds, assistant_only=assistant_only)
+    starts: list[dict[str, Any]] = []
+    for candidate in event_boundary_candidates(state, source_blocks):
+        if not candidate.get("hard_boundary"):
+            continue
+        starts.append(
+            {
+                "candidate_id": str(candidate["candidate_id"]),
+                "partition_key": str(candidate["right"]),
+                "start": deepcopy(candidate.get("right_context")),
+                "reason": str(candidate.get("hard_reason", "")),
+            }
         )
-        if candidate_id and candidate_id not in result:
-            result.append(candidate_id)
-    return result
+    for candidate in event_internal_start_candidates(
+        rounds, assistant_only=assistant_only
+    ):
+        if not candidate.get("hard_boundary"):
+            continue
+        starts.append(
+            {
+                "candidate_id": str(candidate["candidate_id"]),
+                "partition_key": str(candidate["candidate_id"]),
+                "start": {
+                    "source_ref": str(candidate.get("source_ref", "")),
+                    "quote": str(candidate.get("start_quote", "")),
+                },
+                "reason": str(candidate.get("hard_reason", "")),
+            }
+        )
+    return starts
+
+
+def _candidate_decision_map(
+    values: Any, candidate_ids: Iterable[str]
+) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """读取候选结论；缺失或非法结论安全降为 unresolved，不触发模型重试。"""
+
+    allowed = set(candidate_ids)
+    decisions: dict[str, str] = {}
+    diagnostics: list[dict[str, Any]] = []
+    for item in _as_list(values):
+        if not isinstance(item, dict):
+            diagnostics.append({"reason": "候选结论不是对象"})
+            continue
+        candidate_id = str(item.get("candidate_id", "")).strip()
+        decision = str(item.get("decision", "")).strip()
+        basis_code = str(item.get("basis_code", "")).strip()
+        if candidate_id not in allowed:
+            diagnostics.append(
+                {"candidate_id": candidate_id, "reason": "候选编号不存在"}
+            )
+            continue
+        if decision not in BOUNDARY_DECISIONS:
+            decision = "unresolved"
+            diagnostics.append(
+                {"candidate_id": candidate_id, "reason": "结论非法，已转为待观察"}
+            )
+        if basis_code and basis_code not in BOUNDARY_BASIS_CODES:
+            diagnostics.append(
+                {"candidate_id": candidate_id, "reason": "依据标签未识别"}
+            )
+        decisions[candidate_id] = decision
+    for candidate_id in allowed:
+        if candidate_id not in decisions:
+            decisions[candidate_id] = "unresolved"
+            diagnostics.append(
+                {"candidate_id": candidate_id, "reason": "模型漏答，已转为待观察"}
+            )
+    return decisions, diagnostics
 
 
 def _block_partition_map(
@@ -693,41 +1013,290 @@ def _block_partition_map(
     return result
 
 
+def _event_quote_location(
+    rounds: list[dict[str, Any]], quote: str
+) -> tuple[str, str, int] | None:
+    """把模型从连续正文复制的开头找回 AI 原消息；近似抄写只做保守修正。"""
+
+    messages = event_source_messages(rounds)
+    exact: list[tuple[str, str, int]] = []
+    for message in messages:
+        text_value = str(message.get("content", ""))
+        span = anchor_span(text_value, quote)
+        if span is not None:
+            exact.append((str(message["ref"]), text_value[span[0] : span[1]], span[0]))
+    if exact:
+        return exact[0]
+
+    best: tuple[float, str, str, int] | None = None
+    compact_quote = normalize_anchor(quote)
+    if len(compact_quote) < 6:
+        return None
+    for message in messages:
+        text_value = str(message.get("content", ""))
+        for unit in _message_source_units(message):
+            candidate = str(unit.get("content", "")).strip()
+            score = SequenceMatcher(
+                None,
+                compact_quote,
+                normalize_anchor(candidate),
+                autojunk=False,
+            ).ratio()
+            item = (score, str(message["ref"]), candidate, int(unit["start"]))
+            if best is None or item[0] > best[0]:
+                best = item
+    if best is None or best[0] < 0.62:
+        return None
+    return best[1], best[2], best[3]
+
+
+def _quote_starts_event_message(message_text: str, offset: int) -> bool:
+    """场景标题和空白不算正文；其后的第一句话视为该 AI 消息开头。"""
+
+    prefix = str(message_text)[:offset]
+    return not event_narrative_body(prefix)
+
+
+def prepare_model_event_starts(
+    plan: dict[str, Any], state: dict[str, Any], rounds: list[dict[str, Any]]
+) -> None:
+    """将自然语言 start_quote 转成后台分区键；这些键从未展示给模型。"""
+
+    blocks = event_source_blocks(rounds, assistant_only=True)
+    block_by_ref = {
+        str(ref): block
+        for block in blocks
+        for ref in _as_list(block.get("source_refs"))
+    }
+    messages = {
+        str(message["ref"]): str(message.get("content", ""))
+        for message in event_source_messages(rounds)
+    }
+    # V2 已由第一阶段 AI 明确给出边界，内容阶段只会携带 partition_key。
+    # 不再运行旧版针对样本语义的内部起点探测，避免它暗中改变实验结果。
+    v2_ai_map = plan.get("boundary_source") == "ai_narrative_map_v2"
+    known_internal = (
+        []
+        if v2_ai_map
+        else event_internal_start_candidates(rounds, assistant_only=True)
+    )
+    model_candidates: list[dict[str, Any]] = []
+    diagnostics: list[dict[str, Any]] = []
+    previous_key = ""
+    has_forming = any(
+        event.get("status") == "forming" for event in state.get("events", [])
+    )
+
+    for index, update in enumerate(_as_list(plan.get("event_updates"))):
+        if not isinstance(update, dict):
+            continue
+        quote = str(update.get("start_quote", "")).strip()
+        existing_partition = str(update.get("partition_key", "")).strip()
+        if not quote and existing_partition:
+            previous_key = existing_partition
+            continue
+        if not quote and str(update.get("slot", "")).strip():
+            # 旧记录直接使用运行 slot，没有自然语言 start_quote；不把它误改成
+            # 新协议的后台分区键。
+            continue
+        location = _event_quote_location(rounds, quote) if quote else None
+        if location is None:
+            fallback = previous_key or (
+                "existing_forming_tail"
+                if index == 0 and has_forming and update.get("continues_previous")
+                else str(blocks[0].get("block_id", ""))
+            )
+            update["partition_key"] = fallback
+            diagnostics.append(
+                {
+                    "event_update": index,
+                    "start_quote": quote,
+                    "reason": "开头短引无法定位；保持在相邻范围并保全内容",
+                }
+            )
+            previous_key = fallback
+            continue
+
+        source_ref, source_quote, offset = location
+        update["start_quote"] = source_quote
+        if index == 0 and has_forming and bool(update.get("continues_previous")):
+            partition_key = "existing_forming_tail"
+        elif _quote_starts_event_message(messages.get(source_ref, ""), offset):
+            partition_key = str(block_by_ref.get(source_ref, {}).get("block_id", ""))
+        else:
+            matching_known = next(
+                (
+                    item
+                    for item in known_internal
+                    if str(item.get("source_ref", "")) == source_ref
+                    and quote_in_text(
+                        str(item.get("start_quote", "")), source_quote
+                    )
+                ),
+                None,
+            )
+            if matching_known is not None:
+                partition_key = str(matching_known["candidate_id"])
+            else:
+                partition_key = f"model_start_{index + 1:03d}"
+                model_candidates.append(
+                    {
+                        "candidate_id": partition_key,
+                        "source_ref": source_ref,
+                        "source_unit_ref": "",
+                        "left_quote": "",
+                        "start_quote": source_quote,
+                        "script_clues": ["model_story_start"],
+                        "hard_boundary": False,
+                        "hard_reason": "",
+                        "nature": "模型从连续故事中标出的开头",
+                    }
+                )
+        update["partition_key"] = partition_key
+        previous_key = partition_key
+        if source_quote != quote:
+            diagnostics.append(
+                {
+                    "event_update": index,
+                    "start_quote": quote,
+                    "source_quote": source_quote,
+                    "reason": "开头短引已修正为 AI 原文",
+                }
+            )
+
+    plan["script_model_start_candidates"] = model_candidates
+    plan["script_model_start_diagnostics"] = diagnostics
+    if any(
+        isinstance(update, dict) and "start_quote" in update
+        for update in _as_list(plan.get("event_updates"))
+    ):
+        plan["source_roles"] = ["assistant"]
+
+
 def derive_event_segments(
     plan: dict[str, Any], state: dict[str, Any], rounds: list[dict[str, Any]]
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """从默认分开的回合块和少量撤销项确定性生成 Event 分段。
+    """把模型最终 Event 分项作为唯一语义权威，并由脚本确定性裁切来源。"""
 
-    原始消息始终不改写；同一组输入和合并编号会得到同一分段。保存这里返回的
-    ``partition`` 后，可以换用旧合并编号重新生成，从而支持最近未定稿窗口回退。
-    """
-
-    source_blocks = event_source_blocks(rounds)
+    assistant_only = _as_list(plan.get("source_roles")) == ["assistant"]
+    source_blocks = event_source_blocks(rounds, assistant_only=assistant_only)
     candidates = event_boundary_candidates(state, source_blocks)
+    internal_candidates = [
+        *event_internal_start_candidates(
+            rounds, assistant_only=assistant_only
+        ),
+        *[
+            item
+            for item in _as_list(plan.get("script_model_start_candidates"))
+            if isinstance(item, dict)
+        ],
+    ]
     candidate_ids = [str(item["candidate_id"]) for item in candidates]
-    deferred_ids = [
-        str(item["candidate_id"])
-        for item in candidates
-        if item.get("merge_policy") == "defer_until_later_context"
-    ]
-    requested_merge_ids = _boundary_merge_ids(plan)
-    deferred_merge_ids = [
-        value for value in requested_merge_ids if value in deferred_ids
-    ]
-    merged_ids = [
-        value
-        for value in requested_merge_ids
-        if value in candidate_ids and value not in deferred_ids
-    ]
-    warnings = [
-        f"未知候选交界 {value} 已忽略；默认保留该处边界"
-        for value in requested_merge_ids
-        if value not in candidate_ids
-    ]
-    warnings.extend(
-        f"{value} 本批需保留到后续上下文，模型的合并请求已暂缓"
-        for value in deferred_merge_ids
+    internal_candidate_ids = [str(item["candidate_id"]) for item in internal_candidates]
+    all_candidate_ids = set(candidate_ids) | set(internal_candidate_ids)
+    candidate_to_partition = {
+        str(item["candidate_id"]): str(item["right"]) for item in candidates
+    }
+    candidate_to_partition.update(
+        {candidate_id: candidate_id for candidate_id in internal_candidate_ids}
     )
+    valid_start_keys = {
+        str(block["block_id"]) for block in source_blocks
+    } | set(internal_candidate_ids) | {"existing_forming_tail"}
+    warnings: list[str] = []
+
+    selected_start_keys: set[str] = set()
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            continue
+        partition_key = str(update.get("partition_key", "")).strip()
+        if partition_key in valid_start_keys:
+            selected_start_keys.add(partition_key)
+        elif partition_key:
+            warnings.append(f"Event 分项开头 {partition_key} 不属于本批候选")
+
+    hard_candidate_ids = {
+        str(item["candidate_id"])
+        for item in [*candidates, *internal_candidates]
+        if item.get("hard_boundary")
+    }
+    hard_start_keys = {
+        candidate_to_partition[candidate_id]
+        for candidate_id in hard_candidate_ids
+        if candidate_id in candidate_to_partition
+    }
+    selected_start_keys.update(hard_start_keys)
+
+    # 旧运行记录可能仍带两套 decisions。只兼容其明确的新边界与待观察项：
+    # 分开的 Event 分项优先，旧 continue 永远不能把它们重新合并。
+    legacy_fields_present = any(
+        field in plan for field in ("boundary_decisions", "internal_start_decisions")
+    )
+    for field in ("boundary_decisions", "internal_start_decisions"):
+        for item in _as_list(plan.get(field)):
+            if not isinstance(item, dict) or item.get("decision") != "new_event":
+                continue
+            candidate_id = str(item.get("candidate_id", "")).strip()
+            partition_key = candidate_to_partition.get(candidate_id)
+            if partition_key:
+                selected_start_keys.add(partition_key)
+    if legacy_fields_present:
+        warnings.append("旧记录的 decisions 只用于恢复明确边界；当前分段以 Event 分项为准")
+
+    unresolved_ids: set[str] = set()
+    unresolved_values = plan.get("unresolved_candidate_ids")
+    if isinstance(unresolved_values, list):
+        for value in unresolved_values:
+            candidate_id = str(value).strip()
+            if candidate_id in all_candidate_ids:
+                unresolved_ids.add(candidate_id)
+            elif candidate_id:
+                warnings.append(f"待观察候选 {candidate_id} 不存在")
+    elif unresolved_values is not None:
+        warnings.append("unresolved_candidate_ids 不是数组，已忽略")
+    elif legacy_fields_present:
+        for field in ("boundary_decisions", "internal_start_decisions"):
+            for item in _as_list(plan.get(field)):
+                if not isinstance(item, dict) or item.get("decision") != "unresolved":
+                    continue
+                candidate_id = str(item.get("candidate_id", "")).strip()
+                if candidate_id in all_candidate_ids:
+                    unresolved_ids.add(candidate_id)
+
+    conflicting_unresolved = {
+        candidate_id
+        for candidate_id in unresolved_ids
+        if candidate_to_partition.get(candidate_id) in selected_start_keys
+    }
+    if conflicting_unresolved:
+        unresolved_ids.difference_update(conflicting_unresolved)
+        warnings.append(
+            "已采用的 Event 开头同时被列为待观察；脚本以最终分项为准"
+        )
+
+    decisions = {
+        candidate_id: (
+            "new_event"
+            if candidate_to_partition[candidate_id] in selected_start_keys
+            else "unresolved"
+            if candidate_id in unresolved_ids
+            else "continue"
+        )
+        for candidate_id in candidate_ids
+    }
+    internal_decisions = {
+        candidate_id: (
+            "new_event"
+            if candidate_id in selected_start_keys
+            else "unresolved"
+            if candidate_id in unresolved_ids
+            else "continue"
+        )
+        for candidate_id in internal_candidate_ids
+    }
+    for candidate_id in hard_candidate_ids:
+        unresolved_ids.discard(candidate_id)
+        warnings.append(f"{candidate_id} 由脚本确认为完成型重要地点转换硬边界")
 
     has_forming = any(
         event.get("status") == "forming" for event in state.get("events", [])
@@ -735,7 +1304,8 @@ def derive_event_segments(
     groups: list[dict[str, Any]] = []
     for index, block in enumerate(source_blocks):
         candidate_id = f"before_{block['block_id']}"
-        merge_with_left = candidate_id in merged_ids
+        decision = decisions.get(candidate_id, "new_event")
+        merge_with_left = decision != "new_event"
         if index == 0:
             groups.append(
                 {
@@ -753,11 +1323,11 @@ def derive_event_segments(
     message_order = {str(message["ref"]): index for index, message in enumerate(messages)}
     additional: list[dict[str, Any]] = []
     used_start_ids: set[str] = set()
-    for raw_start in _as_list(plan.get("additional_starts")):
-        if not isinstance(raw_start, dict):
-            warnings.append("一项 additional_starts 不是对象，已忽略")
+    for raw_start in internal_candidates:
+        candidate_id = str(raw_start.get("candidate_id", ""))
+        if internal_decisions.get(candidate_id) != "new_event":
             continue
-        start_id = str(raw_start.get("start_id", "")).strip()
+        start_id = candidate_id
         source_ref = str(raw_start.get("source_ref", "")).strip()
         quote = str(raw_start.get("start_quote", "")).strip()
         span = anchor_span(message_map.get(source_ref, ""), quote)
@@ -777,6 +1347,71 @@ def derive_event_segments(
                 "character_offset": span[0],
             }
         )
+
+    # 含混候选不会物化边界。若其后出现明确的新 Event，脚本即可把该候选
+    # 解释为“继续到更晚的明确边界”；只有最后一个明确边界之后的含混点
+    # 继续留在活动工作区。这样既不提前冻结微分段，也不压掉后续清晰边界。
+    ordered_candidates: list[dict[str, Any]] = []
+    block_by_id = {str(block["block_id"]): block for block in source_blocks}
+    for candidate in candidates:
+        right_block = block_by_id.get(str(candidate.get("right", "")), {})
+        right_refs = _as_list(right_block.get("source_refs"))
+        source_ref = str(right_refs[0]) if right_refs else ""
+        ordered_candidates.append(
+            {
+                "candidate_id": str(candidate["candidate_id"]),
+                "decision": decisions.get(str(candidate["candidate_id"]), "unresolved"),
+                "position": (message_order.get(source_ref, -1), -1),
+            }
+        )
+    internal_by_id = {
+        str(candidate.get("candidate_id", "")): candidate
+        for candidate in internal_candidates
+    }
+    for candidate_id, decision in internal_decisions.items():
+        candidate = internal_by_id.get(candidate_id, {})
+        source_ref = str(candidate.get("source_ref", ""))
+        quote = str(candidate.get("start_quote", ""))
+        span = anchor_span(message_map.get(source_ref, ""), quote)
+        ordered_candidates.append(
+            {
+                "candidate_id": candidate_id,
+                "decision": decision,
+                "position": (
+                    message_order.get(source_ref, -1),
+                    span[0] if span is not None else -1,
+                ),
+            }
+        )
+    ordered_candidates.sort(key=lambda item: item["position"])
+    confirmed_positions = [
+        (item["position"], str(item["candidate_id"]))
+        for item in ordered_candidates
+        if item["decision"] == "new_event"
+    ]
+    active_unresolved_ids: list[str] = []
+    resolved_unresolved: list[dict[str, str]] = []
+    for item in ordered_candidates:
+        if item["decision"] != "unresolved":
+            continue
+        later = next(
+            (
+                candidate_id
+                for position, candidate_id in confirmed_positions
+                if position > item["position"]
+            ),
+            None,
+        )
+        if later is None:
+            active_unresolved_ids.append(str(item["candidate_id"]))
+        else:
+            resolved_unresolved.append(
+                {
+                    "candidate_id": str(item["candidate_id"]),
+                    "resolution": "continued_until_later_confirmed_boundary",
+                    "resolved_by": later,
+                }
+            )
 
     chunks: list[dict[str, Any]] = []
     applied_start_ids: list[str] = []
@@ -875,15 +1510,40 @@ def derive_event_segments(
         segments.append(chunk)
 
     partition = {
-        "version": 1,
-        "mode": "default_split_then_merge",
+        "version": 3,
+        "mode": "event_updates_as_single_segmentation_authority",
         "candidate_ids": candidate_ids,
-        "merged_boundary_ids": merged_ids,
-        "deferred_merge_ids": deferred_merge_ids,
+        "boundary_decisions": decisions,
+        "unresolved_boundary_ids": [
+            candidate_id
+            for candidate_id in active_unresolved_ids
+            if candidate_id in candidate_ids
+        ],
+        "unresolved_internal_start_ids": [
+            candidate_id
+            for candidate_id in active_unresolved_ids
+            if candidate_id in internal_candidate_ids
+        ],
+        "resolved_unresolved": resolved_unresolved,
+        "confirmed_boundary_ids": [
+            candidate_id for _, candidate_id in confirmed_positions
+        ],
+        "selected_event_start_keys": [
+            str(segment["partition_key"]) for segment in segments
+        ],
+        "hard_boundary_ids": sorted(hard_candidate_ids),
+        "internal_start_decisions": internal_decisions,
         "additional_start_ids": applied_start_ids,
         "partition_keys": [str(segment["partition_key"]) for segment in segments],
         "block_partition_map": _block_partition_map(
-            segments, source_blocks, _as_list(plan.get("additional_starts"))
+            segments,
+            source_blocks,
+            [
+                item
+                for item in internal_candidates
+                if internal_decisions.get(str(item.get("candidate_id", "")))
+                == "new_event"
+            ],
         ),
         "warnings": warnings,
     }
@@ -936,48 +1596,151 @@ def source_inventory(
 def build_event_prompt(
     state: dict[str, Any], rounds: list[dict[str, Any]], batch_number: int
 ) -> str:
-    """给 Event 任务完整尾部正文、相关实体简介与本批原文。"""
+    """发送一篇 AI-only 连续故事；不暴露回合、消息、候选数组或场景标题。"""
 
     tail = state_view_for_boundary(state)
-    events_by_id = {event["id"]: event for event in state["events"]}
-    for field in ("pending_event", "forming_event"):
+    context_lines: list[str] = []
+    previous = str(tail.get("previous_finalized_description") or "").strip()
+    if previous:
+        context_lines.append(f"更早一项已定稿经历：{previous}")
+    for label, field in (("待定稿", "pending_event"), ("生成中", "forming_event")):
         preview = tail.get(field)
-        if isinstance(preview, dict) and preview.get("id") in events_by_id:
-            event = events_by_id[preview["id"]]
-            preview.pop("story_summary", None)
-            preview["recent_event_beats"] = deepcopy(
-                event.get("event_beats", [])[-8:]
+        if not isinstance(preview, dict):
+            continue
+        title = str(preview.get("title", "")).strip()
+        summary = str(preview.get("story_summary", "")).strip()
+        description = str(preview.get("description", "")).strip()
+        text_value = summary or description
+        if title or text_value:
+            context_lines.append(f"上一{label}经历：{title}。{text_value}".strip("。"))
+
+    related = related_entity_context(state, rounds, assistant_only=True)
+    entity_lines = [
+        f"{item.get('primary_name') or item.get('entity_key')}：{item.get('description', '')}"
+        for item in _as_list(related.get("entities"))
+        if isinstance(item, dict)
+    ]
+    hard_quotes = _unique(
+        str((item.get("start") or {}).get("quote", "")).strip()
+        for item in hard_event_starts(state, rounds, assistant_only=True)
+        if isinstance(item, dict)
+        and isinstance(item.get("start"), dict)
+        and str((item.get("start") or {}).get("quote", "")).strip()
+    )
+
+    sections = [
+        f"第 {batch_number} 批。下面是按原顺序合成的一段连续 AI 叙事。",
+    ]
+    if context_lines:
+        sections.append(
+            "衔接背景不是本批事实来源：\n" + "\n".join(context_lines)
+        )
+    if entity_lines:
+        sections.append("相关对象背景只用于辨认身份：\n" + "\n".join(entity_lines))
+    sections.append("本批连续叙事：\n" + event_narrative_text(rounds))
+    if hard_quotes:
+        rendered = "；".join(f"“{quote}”" for quote in hard_quotes)
+        sections.append(
+            "通读故事后还需保留这些已经由实际场景转换确认的新故事开头："
+            + rendered
+            + "。"
+        )
+    sections.append("直接返回最终 JSON。")
+    return "\n\n".join(sections)
+
+
+def build_event_content_repair_prompt(
+    plan: dict[str, Any],
+    errors: list[str],
+    state: dict[str, Any],
+    rounds: list[dict[str, Any]],
+) -> str | None:
+    """边界已明确但内容漏段时，只发送固定分段和对应原文补齐内容。"""
+
+    missing_keys: list[str] = []
+    missing_slots: list[str] = []
+    for error in errors:
+        error_text = str(error).strip()
+        match = re.fullmatch(r"缺少 Event 内容：(.+)", error_text)
+        if match:
+            missing_keys.extend(
+                key.strip() for key in match.group(1).split(",") if key.strip()
             )
-            preview["key_details"] = deepcopy(event.get("key_details", []))
-            preview["event_time"] = deepcopy(event.get("event_time"))
-            preview["location_occurrences"] = deepcopy(
-                event.get("location_occurrences", [])
-            )
-            preview["related_entity_keys"] = deepcopy(
-                event.get("related_entity_keys", [])
-            )
-    source_blocks = event_source_blocks(rounds)
+            continue
+        match = re.fullmatch(
+            r"(.+?) (?:缺少本批新增故事摘要|的本批故事摘要没有包含新增内容)",
+            error_text,
+        )
+        if match:
+            missing_slots.append(match.group(1).strip())
+    slot_to_key = {
+        str(segment.get("slot", "")).strip(): str(
+            segment.get("partition_key", "")
+        ).strip()
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict)
+    }
+    missing_keys.extend(
+        slot_to_key[slot]
+        for slot in missing_slots
+        if slot in slot_to_key and slot_to_key[slot]
+    )
+    missing_keys = _unique(missing_keys)
+    if not missing_keys or validate_boundary_plan(plan, state, rounds):
+        return None
+    fixed_segments = []
+    for segment in bounded_segments_for_content(plan, rounds):
+        partition_key = str(segment.get("partition_key", "")).strip()
+        if not partition_key:
+            continue
+        fixed_segments.append(
+            {
+                "partition_key": partition_key,
+                "start_anchors": deepcopy(segment.get("start_anchors", [])),
+                "end_before_anchors": deepcopy(
+                    segment.get("end_before_anchors", [])
+                ),
+                "assigned_messages": deepcopy(
+                    segment.get("assigned_messages", [])
+                ),
+            }
+        )
+    if not fixed_segments:
+        return None
     payload = {
-        "batch_number": batch_number,
-        "source_inventory": source_inventory(state, rounds),
-        "source_blocks": {
-            "nature": "脚本按完整回合生成的可回退候选块；默认分别保留，模型只决定撤销哪些相邻交界",
-            "items": source_blocks,
-        },
-        "boundary_candidates": {
-            "nature": "默认 keep_boundary；只有 current_batch 候选可因同一未完现场行动或直接结果补全列入 boundary_merges",
-            "items": event_boundary_candidates(state, source_blocks),
-        },
-        "existing_event_tail": tail,
-        "related_entities": related_entity_context(state, rounds),
-        "new_messages": batch_messages(rounds),
+        "repair_scope": "边界已由上一回复确认；本次只补齐固定分段内容",
+        "missing_partition_keys": missing_keys,
+        "fixed_segments": fixed_segments,
+        "existing_event_tail": state_view_for_boundary(state),
     }
     return (
-        "处理同一批次的客观 Event。\n"
-        + json.dumps(payload, ensure_ascii=False, indent=2)
-        + "\n\n"
-        + EVENT_ATTENTION_GUIDE
+        "上一回复已经确认 Event 边界，脚本已按这些标记点把原文裁成 fixed_segments；"
+        "每段 assigned_messages 就是该段可使用的本批原文。"
+        "边界、partition_key 和来源范围均已锁定，不再判断、移动、合并或新增。\n"
+        "为 fixed_segments 中每一段重写一项完整 event_updates。每个 partition_key 恰好出现一次；"
+        "各项只写自己的 assigned_messages。只有延续旧 Event 的分段可以从 existing_event_tail "
+        "保留仍有效的旧事实。只输出 {\"event_updates\":[...]}，不解释。\n"
+        + json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
     )
+
+
+def merge_event_content_repair(
+    locked_plan: dict[str, Any], repair_response: dict[str, Any]
+) -> dict[str, Any]:
+    """补写回复只能替换内容，不能改动已确认的边界结论。"""
+
+    repaired = {
+        "old_forming_disposition": locked_plan.get("old_forming_disposition"),
+        "decision_reason": locked_plan.get("decision_reason", ""),
+        "source_roles": deepcopy(locked_plan.get("source_roles")),
+        "segments": deepcopy(_as_list(locked_plan.get("segments"))),
+        "script_partition": deepcopy(locked_plan.get("script_partition")),
+        "unresolved_candidate_ids": deepcopy(
+            _as_list(locked_plan.get("unresolved_candidate_ids"))
+        ),
+        "event_updates": deepcopy(_as_list(repair_response.get("event_updates"))),
+    }
+    return repaired
 
 
 def build_memory_prompt(
@@ -1040,6 +1803,12 @@ def build_task_specs(
             "validator": lambda plan, s=state, r=rounds: validate_event_plan(
                 plan, s, r
             ),
+            "repair_prompt_builder": (
+                lambda plan, errors, s=state, r=rounds: build_event_content_repair_prompt(
+                    plan, errors, s, r
+                )
+            ),
+            "repair_plan_merger": merge_event_content_repair,
         },
         "memory": {
             "system_prompt": MEMORY_SYSTEM_PROMPT,
@@ -1089,6 +1858,7 @@ def normalize_event_plan(
     """由后一 Event 的开头派生前一段结束线，模型无需重复输出边界。"""
 
     normalized = deepcopy(plan)
+    prepare_model_event_starts(normalized, state, rounds)
     raw_segments = normalized.get("segments")
     if not isinstance(raw_segments, list) or not raw_segments:
         derived_segments, partition = derive_event_segments(normalized, state, rounds)
@@ -1096,19 +1866,19 @@ def normalize_event_plan(
         normalized["script_partition"] = partition
         normalized.setdefault(
             "decision_reason",
-            "模型撤销 "
-            + str(len(partition["merged_boundary_ids"]))
-            + " 处候选交界；其余交界由脚本按默认分段保留",
+            "模型返回 "
+            + str(len(partition["selected_event_start_keys"]))
+            + " 个最终 Event 分项；脚本另核对并强制 "
+            + str(len(partition["hard_boundary_ids"]))
+            + " 个完成型重要地点转换起点",
         )
         normalized["decision_reason_source"] = "script_partition"
-    normalized.setdefault("boundary_merges", [])
-    normalized.setdefault("additional_starts", [])
-    normalized.setdefault("boundary_uncertainties", [])
 
     boundary_source = {
         "old_forming_disposition": normalized.get("old_forming_disposition"),
         "decision_reason": normalized.get("decision_reason"),
         "segments": deepcopy(normalized.get("segments")),
+        "source_roles": deepcopy(normalized.get("source_roles")),
     }
     messages = {message["ref"]: message["content"] for message in batch_messages(rounds)}
     script_repairs: list[dict[str, str]] = []
@@ -1204,7 +1974,6 @@ def normalize_event_plan(
         if not isinstance(update, dict):
             continue
         for field in (
-            "event_beats_add",
             "unresolved_add",
             "unresolved_resolve",
             "retire_detail_ids",
@@ -1223,12 +1992,29 @@ def normalize_event_plan(
     normalized["segments"] = boundary.get("segments", [])
     normalized["boundaries"] = boundary.get("boundaries", [])
     normalized["script_anchor_repairs"] = script_repairs
-    source_blocks = event_source_blocks(rounds)
-    normalized["script_boundary_candidates"] = event_boundary_candidates(
-        state, source_blocks
-    )
+    assistant_only = _as_list(normalized.get("source_roles")) == ["assistant"]
+    v2_ai_map = normalized.get("boundary_source") == "ai_narrative_map_v2"
+    source_blocks = event_source_blocks(rounds, assistant_only=assistant_only)
+    if v2_ai_map:
+        normalized["script_boundary_candidates"] = []
+        normalized["script_internal_start_candidates"] = []
+    else:
+        normalized["script_boundary_candidates"] = event_boundary_candidates(
+            state, source_blocks
+        )
+        normalized["script_internal_start_candidates"] = [
+            *event_internal_start_candidates(rounds, assistant_only=assistant_only),
+            *[
+                item
+                for item in _as_list(normalized.get("script_model_start_candidates"))
+                if isinstance(item, dict)
+            ],
+        ]
     partition = normalized.get("script_partition")
     if isinstance(partition, dict):
+        selected_internal = {
+            str(value) for value in _as_list(partition.get("additional_start_ids"))
+        }
         partition["block_partition_map"] = _block_partition_map(
             [
                 segment
@@ -1236,14 +2022,25 @@ def normalize_event_plan(
                 if isinstance(segment, dict)
             ],
             source_blocks,
-            _as_list(normalized.get("additional_starts")),
+            [
+                item
+                for item in normalized["script_internal_start_candidates"]
+                if str(item.get("candidate_id", "")) in selected_internal
+            ],
         )
+    _drop_stale_existing_event_copies(normalized, state)
     _coalesce_event_updates_by_partition(normalized)
-    _drop_unassigned_noop_event_updates(normalized)
+    _drop_unassigned_noop_event_updates(normalized, rounds)
     _assign_event_update_slots_from_partition(normalized)
     _repair_unique_event_update_slot(normalized)
-    _reassign_event_beats_by_source(normalized)
+    _materialize_story_summaries(normalized, state)
     _canonicalize_key_details(normalized, rounds)
+    if assistant_only:
+        _project_event_time_and_locations(
+            normalized, rounds, project_locations=not v2_ai_map
+        )
+    _sanitize_event_time_by_source(normalized, state, rounds)
+    _preserve_existing_start_times(normalized, state)
     return normalized
 
 
@@ -1259,6 +2056,97 @@ def _merge_complete_text(left: Any, right: Any, separator: str) -> str:
     if left_text in right_text:
         return right_text
     return left_text.rstrip("。；、/／") + separator + right_text
+
+
+def _drop_stale_existing_event_copies(
+    plan: dict[str, Any], state: dict[str, Any]
+) -> None:
+    """删除把另一个既有 Event 原样抄到当前分区的无歧义候选。"""
+
+    partition = plan.get("script_partition")
+    block_map = (
+        partition.get("block_partition_map", {})
+        if isinstance(partition, dict)
+        else {}
+    )
+    forming = next(
+        (event for event in state.get("events", []) if event.get("status") == "forming"),
+        None,
+    )
+    pending = next(
+        (
+            event
+            for event in state.get("events", [])
+            if event.get("status") == "pending_finalization"
+        ),
+        None,
+    )
+    targets = {
+        "existing_forming_tail": forming,
+        "pending_tail": pending,
+    }
+    existing_events = [
+        event for event in state.get("events", []) if isinstance(event, dict)
+    ]
+    retained: list[Any] = []
+    drops: list[dict[str, str]] = []
+    for raw_update in _as_list(plan.get("event_updates")):
+        if not isinstance(raw_update, dict):
+            retained.append(raw_update)
+            continue
+        raw_key = str(raw_update.get("partition_key", "")).strip()
+        canonical_key = str(block_map.get(raw_key, raw_key)).strip()
+        target = targets.get(canonical_key)
+        if target is None:
+            # 旧测试/旧记录可能只带运行 slot，没有模型 partition_key；此时没有
+            # 足够信息判定它抄错了哪个 Event，交给后续兼容校验处理。
+            retained.append(raw_update)
+            continue
+        summary_candidate = str(
+            raw_update.get("story_summary_add")
+            or raw_update.get("story_summary")
+            or ""
+        ).strip()
+
+        def match_score(event: dict[str, Any] | None) -> int:
+            if not isinstance(event, dict):
+                return 0
+            pairs = (
+                (raw_update.get("title"), event.get("title")),
+                (raw_update.get("description"), event.get("description")),
+                (summary_candidate, event.get("story_summary")),
+            )
+            return sum(
+                bool(str(left or "").strip())
+                and str(left).strip() == str(right or "").strip()
+                for left, right in pairs
+            )
+
+        target_score = match_score(target)
+        mistaken = next(
+            (
+                event
+                for event in existing_events
+                if event is not target
+                and bool(summary_candidate)
+                and summary_candidate == str(event.get("story_summary", "")).strip()
+                and match_score(event) >= 2
+                and match_score(event) > target_score
+            ),
+            None,
+        )
+        if mistaken is not None:
+            drops.append(
+                {
+                    "partition_key": raw_key,
+                    "copied_event_id": str(mistaken.get("id", "")),
+                    "target_event_id": str(target.get("id", "")) if target else "",
+                }
+            )
+            continue
+        retained.append(raw_update)
+    plan["event_updates"] = retained
+    plan["script_stale_event_update_drops"] = drops
 
 
 def _coalesce_event_updates_by_partition(plan: dict[str, Any]) -> None:
@@ -1278,7 +2166,6 @@ def _coalesce_event_updates_by_partition(plan: dict[str, Any]) -> None:
     output: list[Any] = []
     coalesces: list[dict[str, str]] = []
     array_fields = (
-        "event_beats_add",
         "unresolved_add",
         "unresolved_resolve",
         "retire_detail_ids",
@@ -1300,11 +2187,20 @@ def _coalesce_event_updates_by_partition(plan: dict[str, Any]) -> None:
                 canonical_updates[canonical_key] = update
             continue
 
-        target["title"] = _merge_complete_text(
-            target.get("title"), update.get("title"), "／"
+        # 标题和 Description 是检索入口，机械拼接会制造冗长或互相冲突的
+        # 定位文字。模型误按粗块返回多项更新时，保留时间上更晚的一版；
+        # 故事摘要与来源特写仍做保真合并，避免事实随兜底处理消失。
+        if str(update.get("title", "")).strip():
+            target["title"] = str(update["title"]).strip()
+        if str(update.get("description", "")).strip():
+            target["description"] = str(update["description"]).strip()
+        summary_field = (
+            "story_summary_add"
+            if "story_summary_add" in target or "story_summary_add" in update
+            else "story_summary"
         )
-        target["description"] = _merge_complete_text(
-            target.get("description"), update.get("description"), "；"
+        target[summary_field] = _merge_complete_text(
+            target.get(summary_field), update.get(summary_field), "\n"
         )
         for field in array_fields:
             target[field] = _unique(
@@ -1331,20 +2227,23 @@ def _coalesce_event_updates_by_partition(plan: dict[str, Any]) -> None:
     plan["script_update_coalesces"] = coalesces
 
 
-def _drop_unassigned_noop_event_updates(plan: dict[str, Any]) -> None:
-    """删除没有本批事实、也不属于最终分段的模型空更新。"""
+def _drop_unassigned_noop_event_updates(
+    plan: dict[str, Any], rounds: list[dict[str, Any]]
+) -> None:
+    """删除没有本批来源事实、也不属于最终分段的模型旧稿或空更新。"""
 
     partition_keys = {
         str(segment.get("partition_key", "")).strip()
         for segment in _as_list(plan.get("segments"))
         if isinstance(segment, dict) and str(segment.get("partition_key", "")).strip()
     }
-    delta_fields = (
-        "event_beats_add",
+    current_refs = {
+        str(message.get("ref", "")) for message in batch_messages(rounds)
+    }
+    semantic_delta_fields = (
         "unresolved_add",
         "unresolved_resolve",
         "retire_detail_ids",
-        "new_key_details",
     )
     retained: list[Any] = []
     drops: list[dict[str, str]] = []
@@ -1353,10 +2252,29 @@ def _drop_unassigned_noop_event_updates(plan: dict[str, Any]) -> None:
             retained.append(update)
             continue
         partition_key = str(update.get("partition_key", "")).strip()
-        has_source_backed_delta = any(
-            bool(_as_list(update.get(field))) for field in delta_fields
+        has_semantic_delta = any(
+            bool(_as_list(update.get(field))) for field in semantic_delta_fields
         )
-        if partition_key and partition_key not in partition_keys and not has_source_backed_delta:
+        has_current_detail = any(
+            bool(
+                {
+                    str(raw_detail.get("source_ref", "")),
+                    *{
+                        str(ref)
+                        for ref in _as_list(raw_detail.get("source_refs"))
+                    },
+                }
+                & current_refs
+            )
+            for raw_detail in _as_list(update.get("new_key_details"))
+            if isinstance(raw_detail, dict)
+        )
+        if (
+            partition_key
+            and partition_key not in partition_keys
+            and not has_semantic_delta
+            and not has_current_detail
+        ):
             drops.append(
                 {
                     "partition_key": partition_key,
@@ -1426,58 +2344,75 @@ def _repair_unique_event_update_slot(plan: dict[str, Any]) -> None:
     plan["script_slot_repairs"] = repairs
 
 
-def _reassign_event_beats_by_source(plan: dict[str, Any]) -> None:
-    """来源只落入一个其他分段时自动换挂；含混情况留给校验器阻止写入。"""
+def _materialize_story_summaries(
+    plan: dict[str, Any], state: dict[str, Any]
+) -> None:
+    """把本批摘要增量确定性并入目标 Event 的已有摘要。"""
 
-    slot_refs = {
-        str(segment.get("slot", "")): {
-            str(ref) for ref in _as_list(segment.get("source_refs"))
-        }
-        for segment in _as_list(plan.get("segments"))
-        if isinstance(segment, dict)
+    pending = next(
+        (
+            event
+            for event in state.get("events", [])
+            if event.get("status") == "pending_finalization"
+        ),
+        None,
+    )
+    forming = next(
+        (event for event in state.get("events", []) if event.get("status") == "forming"),
+        None,
+    )
+    bases = {
+        "forming_existing": str((forming or {}).get("story_summary", "")),
+        "pending_tail": _merge_complete_text(
+            (pending or {}).get("story_summary", ""),
+            (
+                (forming or {}).get("story_summary", "")
+                if plan.get("old_forming_disposition") == "merge_into_pending"
+                else ""
+            ),
+            "\n",
+        ),
     }
-    updates = {
-        str(update.get("slot", "")): update
-        for update in _as_list(plan.get("event_updates"))
-        if isinstance(update, dict)
-    }
-    moves: list[tuple[str, str, dict[str, Any]]] = []
-    for source_slot, update in updates.items():
-        retained: list[Any] = []
-        for beat in _as_list(update.get("event_beats_add")):
-            if not isinstance(beat, dict):
-                retained.append(beat)
-                continue
-            refs = {str(ref) for ref in _as_list(beat.get("source_refs"))}
-            if refs and refs.issubset(slot_refs.get(source_slot, set())):
-                retained.append(beat)
-                continue
-            targets = [
-                slot
-                for slot, allowed_refs in slot_refs.items()
-                if refs and refs.issubset(allowed_refs) and slot in updates
-            ]
-            if len(targets) == 1:
-                moves.append((source_slot, targets[0], deepcopy(beat)))
-            else:
-                retained.append(beat)
-        update["event_beats_add"] = retained
-    for source_slot, target_slot, beat in moves:
-        updates[target_slot].setdefault("event_beats_add", []).append(beat)
-    plan["script_beat_reassignments"] = [
-        {
-            "from_slot": source_slot,
-            "to_slot": target_slot,
-            "source_refs": deepcopy(beat.get("source_refs", [])),
-        }
-        for source_slot, target_slot, beat in moves
-    ]
+    missing: list[str] = []
+    noops: list[str] = []
+    full_replacements: list[str] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            continue
+        slot = str(update.get("slot", ""))
+        base = bases.get(slot, "")
+        if "story_summary_add" not in update:
+            # 历史记录和本地旧测试仍可提供完整 story_summary。
+            if not str(update.get("story_summary", "")).strip():
+                missing.append(slot)
+            continue
+        addition = str(update.get("story_summary_add", "")).strip()
+        if not addition:
+            missing.append(slot)
+            update["story_summary"] = base
+            continue
+        base_compact = re.sub(r"[\W_]+", "", base, flags=re.UNICODE)
+        addition_compact = re.sub(r"[\W_]+", "", addition, flags=re.UNICODE)
+        if base_compact and addition_compact and addition_compact in base_compact:
+            noops.append(slot)
+            update["story_summary"] = base
+            continue
+        if base_compact and base_compact in addition_compact:
+            # 模型偶尔仍会返回“旧摘要 + 本批新增内容”的完整稿。它已经保全旧事实，
+            # 直接采用即可，避免把旧摘要再机械追加一遍。
+            update["story_summary"] = addition
+            full_replacements.append(slot)
+            continue
+        update["story_summary"] = _merge_complete_text(base, addition, "\n")
+    plan["script_summary_add_missing"] = _unique(missing)
+    plan["script_summary_add_noops"] = _unique(noops)
+    plan["script_summary_full_replacements"] = _unique(full_replacements)
 
 
 def _canonicalize_key_details(
     plan: dict[str, Any], rounds: list[dict[str, Any]]
 ) -> None:
-    """把特写还原为可核对原文；无法定位的软性候选不阻塞整批。"""
+    """核对特写来源；近似抄写可修为原文，其余明确标成转述。"""
 
     assigned: dict[str, dict[str, str]] = {}
     for segment in bounded_segments_for_content(plan, rounds):
@@ -1488,8 +2423,8 @@ def _canonicalize_key_details(
                     message.get("content", "")
                 )
 
-    repairs: list[dict[str, Any]] = []
     drops: list[dict[str, Any]] = []
+    repairs: list[dict[str, Any]] = []
     for update in _as_list(plan.get("event_updates")):
         if not isinstance(update, dict):
             continue
@@ -1502,67 +2437,429 @@ def _canonicalize_key_details(
                 continue
             kind = str(detail.get("kind", ""))
             content = str(detail.get("content", "")).strip()
-            if kind not in {"statement", "action"} or not content:
-                drops.append(
-                    {"slot": slot, "content": content, "reason": "种类或正文为空"}
-                )
-                continue
-
-            declared_refs = [
-                str(ref)
-                for ref in _as_list(detail.get("source_refs"))
-                if str(ref) in slot_messages
-            ]
-            search_refs = _unique([*declared_refs, *slot_messages.keys()])
-            exact: list[tuple[str, str]] = []
-            for ref in search_refs:
-                span = anchor_span(slot_messages[ref], content)
-                if span is not None:
-                    exact.append((ref, slot_messages[ref][span[0] : span[1]]))
-
-            matches = exact
-            repair_kind = "exact_source"
-            if not matches:
-                fuzzy = [
-                    (ref, candidate)
-                    for ref in search_refs
-                    if (candidate := _nearest_source_quote(slot_messages[ref], content))
-                    is not None
+            source_ref = str(detail.get("source_ref", "")).strip()
+            if not source_ref and content:
+                exact_refs = [
+                    ref
+                    for ref, source_text in slot_messages.items()
+                    if quote_in_text(content, source_text)
                 ]
-                distinct = {normalize_anchor(candidate) for _, candidate in fuzzy}
-                if len(distinct) == 1:
-                    matches = fuzzy
-                    repair_kind = "near_source"
-
-            if not matches:
+                if exact_refs:
+                    source_ref = exact_refs[0]
+                else:
+                    nearest_refs = [
+                        ref
+                        for ref, source_text in slot_messages.items()
+                        if _nearest_source_quote(source_text, content) is not None
+                    ]
+                    if nearest_refs:
+                        source_ref = nearest_refs[0]
+            if kind not in {"statement", "action"} or not content or not source_ref:
                 drops.append(
-                    {"slot": slot, "content": content, "reason": "无法唯一核对原文"}
-                )
-                continue
-
-            canonical = matches[0][1]
-            matching_refs = _unique(
-                ref
-                for ref, candidate in matches
-                if normalize_anchor(candidate) == normalize_anchor(canonical)
-            )
-            fixed = deepcopy(detail)
-            fixed["content"] = canonical
-            fixed["source_refs"] = matching_refs
-            canonical_details.append(fixed)
-            if canonical != content or matching_refs != declared_refs:
-                repairs.append(
                     {
                         "slot": slot,
-                        "kind": repair_kind,
-                        "model_content": content,
-                        "source_content": canonical,
-                        "source_refs": matching_refs,
+                        "source_ref": source_ref,
+                        "reason": "种类非法、内容为空或没有来源消息",
                     }
                 )
+                continue
+            if source_ref not in slot_messages:
+                drops.append(
+                    {
+                        "slot": slot,
+                        "source_ref": source_ref,
+                        "reason": "来源消息不属于该 Event",
+                    }
+                )
+                continue
+            source_text = slot_messages[source_ref]
+            fixed = deepcopy(detail)
+            fixed.pop("source_ref", None)
+            fixed.pop("source_unit_refs", None)
+            span = anchor_span(source_text, content)
+            if span is not None:
+                exact_content = source_text[span[0] : span[1]].strip()
+                fixed["content"] = exact_content
+                fixed["fidelity"] = "verbatim"
+                if exact_content != content:
+                    repairs.append(
+                        {
+                            "slot": slot,
+                            "source_ref": source_ref,
+                            "model_content": content,
+                            "source_content": exact_content,
+                        }
+                    )
+            else:
+                nearest = _nearest_source_quote(source_text, content)
+                if nearest is not None:
+                    fixed["content"] = nearest
+                    fixed["fidelity"] = "verbatim"
+                    repairs.append(
+                        {
+                            "slot": slot,
+                            "source_ref": source_ref,
+                            "model_content": content,
+                            "source_content": nearest,
+                        }
+                    )
+                else:
+                    fixed["content"] = content.strip("\"'“”‘’")
+                    fixed["fidelity"] = "paraphrase"
+            fixed["source_refs"] = [source_ref]
+            canonical_details.append(fixed)
         update["new_key_details"] = canonical_details
     plan["script_detail_repairs"] = repairs
     plan["script_detail_drops"] = drops
+
+
+def _project_event_time_and_locations(
+    plan: dict[str, Any], rounds: list[dict[str, Any]], *, project_locations: bool = True
+) -> None:
+    """按“场景头、正文明确表达、空值”把时间地点投影到固定 Event 分段。"""
+
+    metadata_by_slot: dict[str, dict[str, Any]] = {}
+    for segment in bounded_segments_for_content(plan, rounds):
+        slot = str(segment.get("slot", ""))
+        if not slot:
+            continue
+        header_times: list[dict[str, str]] = []
+        header_places: list[dict[str, str]] = []
+        body_parts: list[tuple[str, str]] = []
+        for message in _as_list(segment.get("assigned_messages")):
+            if not isinstance(message, dict):
+                continue
+            source_ref = str(message.get("ref", ""))
+            content = str(message.get("content", ""))
+            body_parts.append((source_ref, content))
+            for match in SCENE_HEADER_RE.finditer(content):
+                header = match.group(0)
+                if time_value := _scene_time(header):
+                    header_times.append(
+                        {
+                            "expression": time_value,
+                            "precision": "exact",
+                            "source_ref": source_ref,
+                            "origin": "scene_header",
+                        }
+                    )
+                if place := _scene_place(header):
+                    header_places.append(
+                        {
+                            "name": place,
+                            "source_ref": source_ref,
+                            "origin": "scene_header",
+                        }
+                    )
+
+        time_points = header_times
+        if not time_points:
+            time_points = [
+                {
+                    "expression": value,
+                    "precision": "approximate",
+                    "source_ref": source_ref,
+                    "origin": "narrative",
+                }
+                for source_ref, content in body_parts
+                if (value := _body_time(content))
+            ][:1]
+
+        places = header_places if project_locations else []
+        if project_locations and not places:
+            places = [
+                {
+                    "name": value,
+                    "source_ref": source_ref,
+                    "origin": "narrative",
+                }
+                for source_ref, content in body_parts
+                if (value := _body_location(content))
+            ][:1]
+
+        metadata_by_slot[slot] = {
+            "time_points": _unique(time_points),
+            "places": _unique(places),
+        }
+
+    forming_slot = ""
+    segments = [
+        segment
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict)
+    ]
+    if segments:
+        forming_slot = str(segments[-1].get("slot", ""))
+
+    projections: list[dict[str, Any]] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            continue
+        slot = str(update.get("slot", ""))
+        metadata = metadata_by_slot.get(slot, {"time_points": [], "places": []})
+        time_points = _as_list(metadata.get("time_points"))
+        places = _as_list(metadata.get("places"))
+
+        if time_points:
+            first = time_points[0]
+            event_time: dict[str, Any] = {
+                "start_time": {
+                    "expression": str(first["expression"]),
+                    "precision": str(first["precision"]),
+                }
+            }
+            last = time_points[-1]
+            if slot != forming_slot and last["expression"] != first["expression"]:
+                event_time["end_time"] = {
+                    "expression": str(last["expression"]),
+                    "precision": str(last["precision"]),
+                }
+            update["event_time"] = event_time
+        else:
+            update["event_time"] = None
+
+        location_keys: list[str] = []
+        occurrences: list[dict[str, Any]] = []
+        unique_places = _unique(
+            str(item.get("name", "")).strip()
+            for item in places
+            if isinstance(item, dict) and str(item.get("name", "")).strip()
+        )
+        for index, place in enumerate(unique_places):
+            key = f"location:{place}"
+            location_keys.append(key)
+            source_refs = _unique(
+                str(item.get("source_ref", ""))
+                for item in places
+                if isinstance(item, dict)
+                and str(item.get("name", "")).strip() == place
+                and str(item.get("source_ref", "")).strip()
+            )
+            if len(unique_places) == 1:
+                roles = ["primary"]
+            elif index == 0:
+                roles = ["start"]
+            elif index == len(unique_places) - 1:
+                roles = ["end"]
+            else:
+                roles = ["transit"]
+            occurrences.append(
+                {
+                    "entity_key": key,
+                    "roles": roles,
+                    "source_refs": source_refs,
+                }
+            )
+        update["locations_add"] = location_keys
+        update["location_occurrences_add"] = occurrences
+        projections.append(
+            {
+                "slot": slot,
+                "time_points": deepcopy(time_points),
+                "places": deepcopy(places),
+            }
+        )
+    plan["script_event_metadata"] = projections
+
+
+def _slot_existing_time_expressions(
+    state: dict[str, Any], plan: dict[str, Any]
+) -> dict[str, set[str]]:
+    """只允许沿用目标尾部 Event 自己已有的时间表达。"""
+
+    def expressions(event: dict[str, Any] | None) -> set[str]:
+        result: set[str] = set()
+        if event is None:
+            return result
+        event_time = event.get("event_time")
+        if not isinstance(event_time, dict):
+            return result
+        for field in ("start_time", "end_time"):
+            point = event_time.get(field)
+            if isinstance(point, dict) and str(point.get("expression", "")).strip():
+                result.add(str(point["expression"]).strip())
+        return result
+
+    pending = next(
+        (
+            event
+            for event in state.get("events", [])
+            if event.get("status") == "pending_finalization"
+        ),
+        None,
+    )
+    forming = next(
+        (
+            event
+            for event in state.get("events", [])
+            if event.get("status") == "forming"
+        ),
+        None,
+    )
+    result = {
+        "forming_existing": expressions(forming),
+        "pending_tail": expressions(pending),
+    }
+    if plan.get("old_forming_disposition") == "merge_into_pending":
+        result["pending_tail"].update(expressions(forming))
+    return result
+
+
+def _sanitize_event_time_by_source(
+    plan: dict[str, Any], state: dict[str, Any], rounds: list[dict[str, Any]]
+) -> None:
+    """删除跨 Event 复用或形成中虚构的时间，不重调模型。"""
+
+    assigned_text = {
+        str(segment.get("slot", "")): "\n".join(
+            str(message.get("content", ""))
+            for message in _as_list(segment.get("assigned_messages"))
+            if isinstance(message, dict)
+        )
+        for segment in bounded_segments_for_content(plan, rounds)
+    }
+    existing = _slot_existing_time_expressions(state, plan)
+    segments = [
+        segment
+        for segment in _as_list(plan.get("segments"))
+        if isinstance(segment, dict)
+    ]
+    forming_slot = str(segments[-1].get("slot", "")) if segments else ""
+    repairs: list[dict[str, str]] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict) or not isinstance(update.get("event_time"), dict):
+            continue
+        slot = str(update.get("slot", ""))
+        event_time = deepcopy(update["event_time"])
+        for field in ("start_time", "end_time"):
+            point = event_time.get(field)
+            if not isinstance(point, dict):
+                continue
+            expression = str(point.get("expression", "")).strip()
+            supported = bool(expression) and (
+                _time_expression_supported(expression, assigned_text.get(slot, ""))
+                or expression in existing.get(slot, set())
+            )
+            if field == "end_time" and slot == forming_slot:
+                supported = False
+            if supported:
+                continue
+            event_time.pop(field, None)
+            repairs.append(
+                {
+                    "slot": slot,
+                    "field": field,
+                    "expression": expression,
+                    "reason": (
+                        "forming_event_has_no_end_time"
+                        if field == "end_time" and slot == forming_slot
+                        else "expression_not_in_event_source"
+                    ),
+                }
+            )
+        if event_time and not isinstance(event_time.get("start_time"), dict):
+            repairs.append(
+                {
+                    "slot": slot,
+                    "field": "event_time",
+                    "expression": str(
+                        (event_time.get("end_time") or {}).get("expression", "")
+                    ),
+                    "reason": "incomplete_without_start_time",
+                }
+            )
+            event_time = {}
+        update["event_time"] = event_time or None
+    plan["script_time_repairs"] = repairs
+
+
+def _preserve_existing_start_times(
+    plan: dict[str, Any], state: dict[str, Any]
+) -> None:
+    """追加内容不能把既有 Event 的开始时间悄悄改晚。"""
+
+    pending = next(
+        (
+            event
+            for event in state.get("events", [])
+            if event.get("status") == "pending_finalization"
+        ),
+        None,
+    )
+    forming = next(
+        (
+            event
+            for event in state.get("events", [])
+            if event.get("status") == "forming"
+        ),
+        None,
+    )
+    events_by_slot = {
+        "pending_tail": pending,
+        "forming_existing": forming,
+    }
+    preservations: list[dict[str, str]] = []
+    for update in _as_list(plan.get("event_updates")):
+        if not isinstance(update, dict):
+            continue
+        slot = str(update.get("slot", ""))
+        existing_event = events_by_slot.get(slot)
+        existing_time = (
+            existing_event.get("event_time")
+            if isinstance(existing_event, dict)
+            else None
+        )
+        existing_start = (
+            existing_time.get("start_time")
+            if isinstance(existing_time, dict)
+            else None
+        )
+        incoming_time = update.get("event_time")
+        if not isinstance(existing_start, dict) or not isinstance(incoming_time, dict):
+            continue
+        incoming_start = incoming_time.get("start_time")
+        if incoming_start == existing_start:
+            continue
+        incoming_time["start_time"] = deepcopy(existing_start)
+        preservations.append(
+            {
+                "slot": slot,
+                "kept_expression": str(existing_start.get("expression", "")),
+                "discarded_expression": (
+                    str(incoming_start.get("expression", ""))
+                    if isinstance(incoming_start, dict)
+                    else ""
+                ),
+                "reason": "existing_boundary_start_unchanged",
+            }
+        )
+    plan["script_time_preservations"] = preservations
+
+
+def _time_expression_supported(expression: str, text: str) -> bool:
+    """允许原文在日期与时辰之间插入星期等补充文字，但不猜测新时间。"""
+
+    if quote_in_text(expression, text):
+        return True
+    parts = [
+        part
+        for part in re.split(r"[\s，。；：、·,.;:|/]+", expression)
+        if len(re.sub(r"[\W_]+", "", part, flags=re.UNICODE)) >= 2
+    ]
+    if len(parts) < 2:
+        return False
+    for line in text.splitlines():
+        compact_line = re.sub(r"[\W_]+", "", line, flags=re.UNICODE)
+        cursor = 0
+        for part in parts:
+            compact_part = re.sub(r"[\W_]+", "", part, flags=re.UNICODE)
+            found = compact_line.find(compact_part, cursor)
+            if found < 0:
+                break
+            cursor = found + len(compact_part)
+        else:
+            return True
+    return False
 
 
 def _nearest_source_quote(text: str, quote: str) -> str | None:
@@ -1613,7 +2910,7 @@ def _evidence_quote_in_text(quote: str, text: str) -> bool:
 def _legacy_content_plan(
     plan: dict[str, Any], boundary_state: dict[str, Any], slot_event_ids: dict[str, str]
 ) -> dict[str, Any]:
-    """把关键特写增量和地点经过转换成已验证过的 Event 内容应用结构。"""
+    """把关键特写候选转换成通用 Event 内容应用结构。"""
 
     events_by_id = {event["id"]: event for event in boundary_state["events"]}
     updates: list[dict[str, Any]] = []
@@ -1643,15 +2940,6 @@ def _legacy_content_plan(
                 for detail in events_by_id[event_id].get("key_details", [])
                 if isinstance(detail, dict) and detail.get("id")
             ]
-        existing_event = events_by_id.get(event_id, {})
-        combined_beats = _merge_event_beats(
-            existing_event.get("event_beats", []),
-            _as_list(update.get("event_beats_add")),
-        )
-        if combined_beats:
-            update["story_summary"] = "\n".join(
-                str(beat.get("content", "")).strip() for beat in combined_beats
-            )
         retired = {str(value) for value in _as_list(update.get("retire_detail_ids"))}
         update["key_details_keep"] = [
             detail_id for detail_id in existing_ids if detail_id not in retired
@@ -1676,74 +2964,39 @@ def validate_event_plan(
 
     errors = validate_boundary_plan(plan, state, rounds)
     warnings: list[str] = []
-    if not isinstance(plan.get("decision_reason"), str) or not str(
-        plan.get("decision_reason", "")
-    ).strip():
-        warnings.append("模型未提供边界短理由；不影响来源分段和提交")
-    if not isinstance(plan.get("boundary_uncertainties"), list):
-        errors.append("boundary_uncertainties 必须是数组")
 
     partition = plan.get("script_partition")
     if isinstance(partition, dict):
-        if not isinstance(plan.get("boundary_merges"), list):
-            errors.append("boundary_merges 必须是数组")
-        if not isinstance(plan.get("additional_starts"), list):
-            errors.append("additional_starts 必须是数组")
-        seen_merge_ids: set[str] = set()
-        for item in _as_list(plan.get("boundary_merges")):
-            if not isinstance(item, dict):
-                warnings.append("boundary_merges 中的非对象项已按候选编号兼容读取")
-                continue
-            candidate_id = str(item.get("candidate_id", "")).strip()
-            reason_code = str(item.get("reason_code", "")).strip()
-            if candidate_id in seen_merge_ids:
-                warnings.append(f"{candidate_id} 被重复列为合并交界；脚本已去重")
-            seen_merge_ids.add(candidate_id)
-            if reason_code not in EVENT_MERGE_REASON_CODES:
-                warnings.append(
-                    f"{candidate_id or '一项候选交界'} 的合并原因代码未识别；"
-                    "原因只用于诊断，不为此重试"
-                )
         warnings.extend(str(item) for item in _as_list(partition.get("warnings")))
+        if _as_list(partition.get("unresolved_boundary_ids")):
+            warnings.append("存在待观察交界；脚本保持连续，没有提前物化或定稿")
+        if _as_list(partition.get("resolved_unresolved")):
+            warnings.append("较早的待观察交界已由后续明确边界收束为连续，不另建微分段")
 
-    boundary_start_refs: set[str] = set()
-    for segment_index, segment in enumerate(_as_list(plan.get("segments"))):
-        if not isinstance(segment, dict):
-            continue
-        slot = str(segment.get("slot", ""))
-        introduces_boundary = segment_index > 0 or (
-            bool(state.get("events")) and slot.startswith("new_")
-        )
-        if not introduces_boundary:
-            continue
-        boundary_start_refs.update(
-            str(anchor.get("source_ref", ""))
-            for anchor in _as_list(segment.get("start_anchors"))
-            if isinstance(anchor, dict)
-        )
-    source_blocks = event_source_blocks(rounds)
-    block_opening_refs = {
-        str(block.get("block_id", "")): str(
-            (block.get("opening") or {}).get("source_ref", "")
-        )
-        for block in source_blocks
-    }
-    for candidate in event_boundary_candidates(state, source_blocks):
-        strong_clue = any(
-            isinstance(clue, dict) and clue.get("kind") == "scene_place_change"
-            for clue in _as_list(candidate.get("script_clues"))
-        )
-        right_ref = block_opening_refs.get(str(candidate.get("right", "")), "")
-        if strong_clue and right_ref and right_ref not in boundary_start_refs:
-            warnings.append(
-                f"脚本检测到 {candidate.get('candidate_id')} 有场景地点变化，但模型未在该回合开头分段；"
-                "仅记录为过粗风险，不自动改写或重试"
+    assistant_only = _as_list(plan.get("source_roles")) == ["assistant"]
+    source_blocks = event_source_blocks(rounds, assistant_only=assistant_only)
+    decision_map = (
+        partition.get("boundary_decisions", {})
+        if isinstance(partition, dict)
+        else {}
+    )
+    if plan.get("boundary_source") != "ai_narrative_map_v2":
+        for candidate in event_boundary_candidates(state, source_blocks):
+            has_place_clue = any(
+                isinstance(clue, dict) and clue.get("kind") == "scene_place_change"
+                for clue in _as_list(candidate.get("script_clues"))
             )
+            if (
+                has_place_clue
+                and decision_map.get(candidate.get("candidate_id")) == "continue"
+            ):
+                warnings.append(
+                    f"{candidate.get('candidate_id')} 跨地点但被判断为连续；"
+                    "地点只是软线索，记录供离线复核"
+                )
     try:
         source_state = deepcopy(state)
-        _ensure_event_beats(source_state)
         boundary_state, _, slot_event_ids = apply_boundary_plan(source_state, plan)
-        _carry_merged_event_beats(boundary_state, source_state, plan, slot_event_ids)
     except (KeyError, TypeError, ValueError) as exc:
         errors.append(f"Event 状态流转无法应用：{exc}")
         return _unique(errors), warnings
@@ -1751,14 +3004,6 @@ def validate_event_plan(
     updates = plan.get("event_updates")
     if not isinstance(updates, list):
         return _unique(errors + ["event_updates 必须是数组"]), warnings
-    valid_refs = {message["ref"] for message in batch_messages(rounds)}
-    segment_refs = {
-        str(segment.get("slot", "")): {
-            str(ref) for ref in _as_list(segment.get("source_refs"))
-        }
-        for segment in _as_list(plan.get("segments"))
-        if isinstance(segment, dict)
-    }
     events_by_id = {event["id"]: event for event in boundary_state["events"]}
     for index, update in enumerate(updates):
         if not isinstance(update, dict):
@@ -1770,31 +3015,14 @@ def validate_event_plan(
             "unresolved_resolve",
             "retire_detail_ids",
             "new_key_details",
-            "event_beats_add",
         ):
             if not isinstance(update.get(field), list):
                 errors.append(f"event_updates[{index}].{field} 必须是数组")
-        for beat_index, beat in enumerate(_as_list(update.get("event_beats_add"))):
-            if not isinstance(beat, dict):
-                errors.append(f"{slot} 的事实段 {beat_index + 1} 不是对象")
-                continue
-            if not str(beat.get("content", "")).strip():
-                errors.append(f"{slot} 的事实段 {beat_index + 1} 内容为空")
-            refs = beat.get("source_refs")
-            if (
-                not isinstance(refs, list)
-                or not refs
-                or any(ref not in valid_refs for ref in refs)
-            ):
-                errors.append(f"{slot} 的事实段 {beat_index + 1} 来源不在本批")
-            elif any(str(ref) not in segment_refs.get(slot, set()) for ref in refs):
-                errors.append(
-                    f"{slot} 的事实段 {beat_index + 1} 来源不属于该 Event 分段"
-                )
         description = str(update.get("description", "")).strip()
+        story_summary = str(update.get("story_summary", "")).strip()
         if len(description) > 160:
             warnings.append(
-                f"{slot} 的 Description 为 {len(description)} 字，超过一百六十字软性目标；不触发重试"
+                f"{slot} 的 Description 为 {len(description)} 字，超过一百六十字软性提示；不触发重试"
             )
 
         event_time = update.get("event_time")
@@ -1839,23 +3067,35 @@ def validate_event_plan(
     )
     errors.extend(content_errors)
     warnings.extend(content_warnings)
-    if _as_list(plan.get("script_beat_reassignments")):
-        warnings.append("脚本按唯一来源分段自动换挂了事实段")
     if _as_list(plan.get("script_update_coalesces")):
         warnings.append("脚本已把撤销交界后的重复 Event 更新归入最终分区")
+    for item in _as_list(plan.get("script_stale_event_update_drops")):
+        if isinstance(item, dict):
+            warnings.append(
+                "脚本已删除一项误抄其他既有 Event 的内容更新："
+                + str(item.get("copied_event_id", ""))
+            )
     if _as_list(plan.get("script_noop_update_drops")):
         warnings.append("脚本已删除不属于最终分段且不含本批事实的 Event 空更新")
     if _as_list(plan.get("script_slot_repairs")):
         warnings.append("脚本按唯一缺失分段修正了一处 Event slot 笔误")
     if _as_list(plan.get("script_detail_repairs")):
-        warnings.append("脚本已把关键特写还原为可核对的来源原文")
+        warnings.append("脚本已将近似抄写的关键特写纠正为可核对原文")
     for item in _as_list(plan.get("script_detail_drops")):
         if isinstance(item, dict):
             warnings.append(
                 f"{item.get('slot', '')} 有一条关键特写无法可靠核对，已软性丢弃且不重试整批"
             )
-    if len(_as_list(plan.get("segments"))) > 1:
-        warnings.extend(str(item) for item in _as_list(plan.get("boundary_uncertainties")))
+    if _as_list(plan.get("script_time_repairs")):
+        warnings.append("脚本删除了无本 Event 来源依据或形成中不应存在的时间字段")
+    if _as_list(plan.get("script_time_preservations")):
+        warnings.append("脚本保留了边界起点未变的既有 Event 开始时间")
+    for slot in _as_list(plan.get("script_summary_add_missing")):
+        errors.append(f"{slot} 缺少本批新增故事摘要")
+    for slot in _as_list(plan.get("script_summary_add_noops")):
+        errors.append(f"{slot} 的本批故事摘要没有包含新增内容")
+    if _as_list(plan.get("script_summary_full_replacements")):
+        warnings.append("模型返回了含旧摘要的完整稿；脚本已避免重复追加")
     return _unique(errors), _unique(warnings)
 
 
@@ -2203,8 +3443,8 @@ def validate_entity_plan(
             if not isinstance(aspect, dict):
                 errors.append(f"relations[{index}].aspects[{aspect_index}] 不是对象")
                 continue
-            if not SNAKE_CASE_RE.fullmatch(str(aspect.get("kind", ""))):
-                errors.append(f"relations[{index}] 的 aspect.kind 必须是 snake_case")
+            if not str(aspect.get("kind", "")).strip():
+                errors.append(f"relations[{index}] 的 aspect.kind 不能为空")
             if aspect.get("status") not in {"active", "ended"}:
                 errors.append(f"relations[{index}] 的 aspect.status 非法")
             if aspect.get("visibility") not in VISIBILITIES:
@@ -2222,7 +3462,7 @@ def validate_entity_plan(
                 if (
                     not isinstance(role_values, list)
                     or not role_values
-                    or any(not SNAKE_CASE_RE.fullmatch(str(value)) for value in role_values)
+                    or any(not str(value).strip() for value in role_values)
                 ):
                     errors.append(f"relations[{index}] 的 participant roles 非法")
         for state_index, direction in enumerate(states):
@@ -2238,7 +3478,7 @@ def validate_entity_plan(
                 errors.append(f"relations[{index}] 的方向状态没有对齐两个端点")
             tags = direction.get("tags")
             if not isinstance(tags, list) or any(
-                not SNAKE_CASE_RE.fullmatch(str(tag)) for tag in _as_list(tags)
+                not str(tag).strip() for tag in _as_list(tags)
             ):
                 errors.append(f"relations[{index}] 的方向 tags 非法")
     return _unique(errors), _unique(warnings)
@@ -2263,15 +3503,29 @@ def run_model_task(
     transport_attempt_limit: int = 1,
     normalizer: Callable[[dict[str, Any]], dict[str, Any]],
     validator: Callable[[dict[str, Any]], tuple[list[str], list[str]]],
+    repair_prompt_builder: Callable[
+        [dict[str, Any], list[str]], str | None
+    ] | None = None,
+    repair_plan_merger: Callable[
+        [dict[str, Any], dict[str, Any]], dict[str, Any]
+    ] | None = None,
 ) -> dict[str, Any]:
-    """运行一项语义任务；无正文的传输可重试，语义候选默认只生成一次。"""
+    """运行语义任务；Event 可锁定边界后额外做一次原文内容补齐。"""
 
     started = time.perf_counter()
     attempts: list[dict[str, Any]] = []
     candidate_prompt = user_prompt
     candidate_attempt_limit = max(1, candidate_attempt_limit)
     transport_attempt_limit = max(1, transport_attempt_limit)
-    for candidate_attempt in range(1, candidate_attempt_limit + 1):
+    semantic_attempts_used = 0
+    candidate_attempt = 0
+    attempt_kind = "semantic_candidate"
+    locked_repair_plan: dict[str, Any] | None = None
+    targeted_repair_used = False
+    while True:
+        candidate_attempt += 1
+        if attempt_kind != "locked_boundary_content_repair":
+            semantic_attempts_used += 1
         raw = ""
         metadata: dict[str, Any] = {}
         transport_failures: list[str] = []
@@ -2300,6 +3554,7 @@ def run_model_task(
                     attempts.append(
                         {
                             "candidate_attempt": candidate_attempt,
+                            "attempt_kind": attempt_kind,
                             "user_prompt": candidate_prompt,
                             "raw": raw,
                             "api": metadata,
@@ -2330,7 +3585,16 @@ def run_model_task(
         try:
             if metadata.get("finish_reason") == "length":
                 raise ValueError("正式回复达到输出长度上限并被截断；请压缩、合并后完整重写")
-            plan = normalizer(extract_json_object(raw))
+            response_object = extract_json_object(raw)
+            if (
+                attempt_kind == "locked_boundary_content_repair"
+                and locked_repair_plan is not None
+                and repair_plan_merger is not None
+            ):
+                response_object = repair_plan_merger(
+                    locked_repair_plan, response_object
+                )
+            plan = normalizer(response_object)
             errors, warnings = validator(plan)
             if thinking_mode == "off" and int(metadata.get("reasoning_chars", 0)) > 500:
                 warnings = [
@@ -2343,6 +3607,7 @@ def run_model_task(
         attempts.append(
             {
                 "candidate_attempt": candidate_attempt,
+                "attempt_kind": attempt_kind,
                 "user_prompt": candidate_prompt,
                 "raw": raw,
                 "api": metadata,
@@ -2371,7 +3636,24 @@ def run_model_task(
                 "warnings": warnings,
                 "elapsed_seconds": round(time.perf_counter() - started, 3),
             }
-        if candidate_attempt < candidate_attempt_limit:
+        if (
+            attempt_kind != "locked_boundary_content_repair"
+            and not targeted_repair_used
+            and plan is not None
+            and repair_prompt_builder is not None
+            and repair_plan_merger is not None
+        ):
+            repair_prompt = repair_prompt_builder(plan, errors)
+            if repair_prompt:
+                locked_repair_plan = deepcopy(plan)
+                candidate_prompt = repair_prompt
+                targeted_repair_used = True
+                attempt_kind = "locked_boundary_content_repair"
+                continue
+        if (
+            attempt_kind != "locked_boundary_content_repair"
+            and semantic_attempts_used < candidate_attempt_limit
+        ):
             prior = json.dumps(plan, ensure_ascii=False) if plan is not None else raw
             candidate_prompt = (
                 user_prompt
@@ -2382,10 +3664,13 @@ def run_model_task(
                 + "\n上一次正式候选：\n"
                 + prior
             )
+            attempt_kind = "semantic_retry"
+            continue
+        break
     return {
         "task": task,
         "ok": False,
-        "fatal_error": f"{candidate_attempt_limit} 次候选均未通过机器结构检查",
+        "fatal_error": f"{len(attempts)} 次模型调用后仍未通过机器结构检查",
         "system_prompt": system_prompt,
         "request_settings": {
             "thinking_mode": thinking_mode,
@@ -2430,6 +3715,18 @@ def _deep_patch(existing: Any, patch: dict[str, Any]) -> dict[str, Any]:
             result[field] = _deep_patch(result.get(field), value)
         elif isinstance(value, list):
             result[field] = _merge_patch_array(field, result.get(field), value)
+        else:
+            result[field] = deepcopy(value)
+    return result
+
+
+def _deep_open_patch(existing: Any, patch: dict[str, Any]) -> dict[str, Any]:
+    """开放事实只递归合并对象；数组按本次完整值替换，不猜语义键。"""
+
+    result = deepcopy(existing) if isinstance(existing, dict) else {}
+    for field, value in patch.items():
+        if isinstance(value, dict):
+            result[field] = _deep_open_patch(result.get(field), value)
         else:
             result[field] = deepcopy(value)
     return result
@@ -2488,7 +3785,7 @@ def _merge_patch_array(field: str, existing: Any, patch: list[Any]) -> list[Any]
             else None
         ),
         "related_concepts": lambda item: (
-            item.get("concept_key") if isinstance(item, dict) else None
+            item.get("concept_key") if isinstance(item, dict) else item
         ),
     }
     key = key_functions.get(field)
@@ -2502,12 +3799,16 @@ def _merge_patch_array(field: str, existing: Any, patch: list[Any]) -> list[Any]
 
 
 def apply_event_candidate(
-    state: dict[str, Any], plan: dict[str, Any]
+    state: dict[str, Any],
+    plan: dict[str, Any],
+    rounds: list[dict[str, Any]] | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, str]]:
-    """执行 Event 分段与内容更新，并同步修正旧 Memory 的合并引用。"""
+    """执行 Event 分段、来源保存与内容更新，并同步修正旧 Memory 引用。"""
 
     old_state = deepcopy(state)
-    _ensure_event_beats(old_state)
+    old_state.setdefault("source_records", {})
+    old_state.setdefault("boundary_workspace", [])
+    source_warnings = append_source_records(old_state, rounds) if rounds else []
     pending_before = next(
         (
             event
@@ -2521,7 +3822,53 @@ def apply_event_candidate(
         None,
     )
     boundary_state, operations, slot_event_ids = apply_boundary_plan(old_state, plan)
-    _carry_merged_event_beats(boundary_state, old_state, plan, slot_event_ids)
+    operations.extend(f"来源校验：{warning}" for warning in source_warnings)
+
+    partition = plan.get("script_partition")
+    if isinstance(partition, dict):
+        candidates = {
+            str(item.get("candidate_id", "")): item
+            for item in [
+                *_as_list(plan.get("script_boundary_candidates")),
+                *_as_list(plan.get("script_internal_start_candidates")),
+            ]
+            if isinstance(item, dict)
+        }
+        existing_workspace = {
+            str(item.get("candidate_id", "")): deepcopy(item)
+            for item in _as_list(boundary_state.get("boundary_workspace"))
+            if isinstance(item, dict) and str(item.get("candidate_id", ""))
+        }
+        confirmed_ids = [
+            str(value)
+            for value in _as_list(partition.get("confirmed_boundary_ids"))
+            if str(value)
+        ]
+        if confirmed_ids:
+            for candidate_id in list(existing_workspace):
+                existing_workspace.pop(candidate_id, None)
+        for resolution in _as_list(partition.get("resolved_unresolved")):
+            if not isinstance(resolution, dict):
+                continue
+            candidate_id = str(resolution.get("candidate_id", ""))
+            candidate = deepcopy(candidates.get(candidate_id, {}))
+            if not candidate:
+                continue
+            candidate.update(deepcopy(resolution))
+            candidate["status"] = "resolved_as_continuation"
+            existing_workspace.pop(candidate_id, None)
+        active_ids = [
+            *_as_list(partition.get("unresolved_boundary_ids")),
+            *_as_list(partition.get("unresolved_internal_start_ids")),
+        ]
+        for candidate_id in active_ids:
+            candidate = deepcopy(candidates.get(str(candidate_id), {}))
+            if not candidate:
+                continue
+            candidate["candidate_id"] = str(candidate_id)
+            candidate["status"] = "unresolved"
+            existing_workspace[str(candidate_id)] = candidate
+        boundary_state["boundary_workspace"] = list(existing_workspace.values())[-16:]
 
     if (
         plan.get("old_forming_disposition") == "merge_into_pending"
@@ -2551,31 +3898,6 @@ def apply_event_candidate(
             continue
         if update.get("event_time") is not None:
             event["event_time"] = deepcopy(update["event_time"])
-
-        incoming_beats = _as_list(update.get("event_beats_add"))
-        existing_signatures = {
-            _beat_signature(beat)
-            for beat in event.setdefault("event_beats", [])
-            if isinstance(beat, dict)
-        }
-        for raw_beat in incoming_beats:
-            if not isinstance(raw_beat, dict):
-                continue
-            beat = deepcopy(raw_beat)
-            signature = _beat_signature(beat)
-            if not signature[0] or signature in existing_signatures:
-                continue
-            number = next_state.setdefault("next_beat_number", 1)
-            next_state["next_beat_number"] = number + 1
-            beat["id"] = f"beat_probe_{number:03d}"
-            event["event_beats"].append(beat)
-            existing_signatures.add(signature)
-        if event.get("event_beats"):
-            event["story_summary"] = "\n".join(
-                str(beat.get("content", "")).strip()
-                for beat in event["event_beats"]
-                if str(beat.get("content", "")).strip()
-            )
 
         removed_locations = {
             str(key) for key in _as_list(update.get("locations_remove"))
@@ -2611,6 +3933,9 @@ def apply_event_candidate(
         event["related_entity_keys"] = _unique(
             related + [str(key) for key in _as_list(update.get("related_entity_keys_add"))]
         )
+    for event in next_state.get("events", []):
+        if isinstance(event, dict):
+            event.pop("_merged_forming_content", None)
     return next_state, operations, slot_event_ids
 
 
@@ -2770,6 +4095,17 @@ def apply_entity_candidates(
                 tuple(item.get("roles") or []),
             ),
         )
+        merged["event_location_evidence"] = _merge_keyed_list(
+            _as_list(old.get("event_location_evidence")),
+            [
+                item
+                for item in _as_list(candidate.get("event_location_evidence"))
+                if isinstance(item, dict)
+            ],
+            lambda item: (item.get("source_ref"), item.get("quote")),
+        )
+        if isinstance(candidate.get("facts_patch"), dict):
+            merged["facts"] = _deep_open_patch(old.get("facts"), candidate["facts_patch"])
         if isinstance(candidate.get("character_data_patch"), dict):
             merged["character_data"] = _deep_patch(
                 old.get("character_data"), candidate["character_data_patch"]
@@ -2795,6 +4131,17 @@ def apply_entity_candidates(
             _as_list(old.get("evidence_refs"))
             + _as_list(candidate.get("evidence_refs"))
         )
+        merged["event_link_evidence"] = _merge_keyed_list(
+            _as_list(old.get("event_link_evidence")),
+            [
+                item
+                for item in _as_list(candidate.get("event_link_evidence"))
+                if isinstance(item, dict)
+            ],
+            lambda item: (item.get("source_ref"), item.get("quote")),
+        )
+        if isinstance(candidate.get("facts_patch"), dict):
+            merged["facts"] = _deep_open_patch(old.get("facts"), candidate["facts_patch"])
         merged["aspects"] = _merge_keyed_list(
             _as_list(old.get("aspects")),
             [item for item in _as_list(candidate.get("aspects")) if isinstance(item, dict)],
@@ -2908,59 +4255,32 @@ def ensure_minimal_entity_nodes(state: dict[str, Any]) -> list[str]:
         }
         warning = f"其他任务引用了 {key}，Entity 任务未返回；脚本已保留最小候选节点"
         warnings.append(warning)
-        _append_warning(state, warning)
     return warnings
 
 
-def reconcile_witnessed_memory_participants(state: dict[str, Any]) -> list[str]:
-    """Memory 已声明亲历时，固定补齐 Owner 的 Event 参与引用，避免历史索引漏链。"""
-
-    warnings: list[str] = []
-    events = {event["id"]: event for event in state.get("events", [])}
-    for memory in state.get("memories", []):
-        if memory.get("acquisition_mode") != "witnessed_event":
-            continue
-        owner_key = memory.get("owner_key")
-        if not is_entity_key(owner_key, "character"):
-            continue
-        for event_id in memory.get("event_ids", []):
-            event = events.get(event_id)
-            if event is None or owner_key in event.get("participants", []):
-                continue
-            event.setdefault("participants", []).append(owner_key)
-            warning = (
-                f"{memory.get('id')} 声明 {owner_key} 亲历 {event_id}；"
-                "脚本已补齐 Event 参与者引用"
-            )
-            warnings.append(warning)
-            _append_warning(state, warning)
-    return warnings
-
-
-def reconcile_key_detail_actors(state: dict[str, Any]) -> list[str]:
-    """能说出关键原话或完成动作特写的 Character 必然属于该 Event。"""
+def reconcile_key_detail_entities(state: dict[str, Any]) -> list[str]:
+    """关键特写的明确主体与 Event 建立普通事实关联，不推断参与类别。"""
 
     warnings: list[str] = []
     for event in state.get("events", []):
-        participants = event.setdefault("participants", [])
+        related = event.setdefault("related_entity_keys", [])
         for detail in event.get("key_details", []):
             actor = detail.get("actor") if isinstance(detail, dict) else None
-            if not is_entity_key(actor, "character") or actor in participants:
+            if not is_entity_key(actor, "character") or actor in related:
                 continue
-            participants.append(actor)
+            related.append(actor)
             warning = (
                 f"{event.get('id')} 的关键特写由 {actor} 说出或完成；"
-                "脚本已补齐 Event 参与者引用"
+                "脚本已补齐普通 Entity 关联"
             )
             warnings.append(warning)
-            _append_warning(state, warning)
     return warnings
 
 
 def reconcile_source_inventory(
     state: dict[str, Any], rounds: list[dict[str, Any]]
 ) -> list[str]:
-    """补齐明确说话人的参与引用；场景头只做地点遗漏警告。"""
+    """补齐明确说话人的普通 Entity 关联；场景头只做地点遗漏警告。"""
 
     warnings: list[str] = []
     messages = {message["ref"]: message for message in batch_messages(rounds)}
@@ -2970,7 +4290,7 @@ def reconcile_source_inventory(
     }
     for event in state.get("events", []):
         refs = set(str(ref) for ref in event.get("source_refs", []))
-        participants = event.setdefault("participants", [])
+        related = event.setdefault("related_entity_keys", [])
         for ref in sorted(refs):
             message = messages.get(ref)
             if not message or message.get("role") != "user":
@@ -2979,19 +4299,17 @@ def reconcile_source_inventory(
             if not speaker or speaker.lower() in {"user", "用户"}:
                 continue
             key = f"character:{speaker}"
-            if key in participants:
+            if key in related:
                 continue
-            participants.append(key)
-            warning = f"{event.get('id')} 包含 {ref} 的玩家行动；脚本已补齐参与者 {key}"
+            related.append(key)
+            warning = f"{event.get('id')} 包含 {ref} 的玩家内容；脚本已补齐普通关联 {key}"
             warnings.append(warning)
-            _append_warning(state, warning)
         if refs & headers_by_ref and not event.get("locations"):
             warning = (
                 f"{event.get('id')} 的来源含场景头但没有实际地点引用；"
                 "脚本保留为检查警告，不凭格式文本自动猜地点"
             )
             warnings.append(warning)
-            _append_warning(state, warning)
     return warnings
 
 
@@ -3011,7 +4329,6 @@ def reconcile_entity_event_links(
             ref_owners.setdefault(str(ref), []).append(event)
 
     for key, candidate in state.get("entity_candidates", {}).items():
-        entity_type = candidate.get("type")
         for evidence in _as_list(candidate.get("event_link_evidence")):
             if not isinstance(evidence, dict):
                 continue
@@ -3022,7 +4339,6 @@ def reconcile_entity_event_links(
             if not quote or not _evidence_quote_in_text(quote, messages[ref]):
                 warning = f"{key} 在 {ref} 的 Event 挂接短引无法核对；脚本未自动挂接"
                 warnings.append(warning)
-                _append_warning(state, warning)
                 continue
 
             owners = ref_owners.get(ref, [])
@@ -3042,42 +4358,89 @@ def reconcile_entity_event_links(
                     "脚本保留疑点，不强行分配"
                 )
                 warnings.append(warning)
-                _append_warning(state, warning)
                 continue
 
             event = matching[0]
             related = event.setdefault("related_entity_keys", [])
             if key not in related:
                 related.append(key)
-            if entity_type == "character":
-                participants = event.setdefault("participants", [])
-                if key not in participants:
-                    participants.append(key)
-                    warning = f"{key} 由 {ref} 自动挂入 {event.get('id')} 参与者"
-                    warnings.append(warning)
-                    _append_warning(state, warning)
-            elif entity_type == "location":
-                locations = event.setdefault("locations", [])
-                if key not in locations:
-                    locations.append(key)
-                roles = [
-                    role
-                    for role in _as_list(evidence.get("roles"))
-                    if role in LOCATION_ROLES
-                ] or ["primary"]
-                occurrences = event.setdefault("location_occurrences", [])
-                if not any(
-                    item.get("entity_key") == key and ref in item.get("source_refs", [])
-                    for item in occurrences
-                    if isinstance(item, dict)
-                ):
-                    occurrences.append(
-                        {
-                            "entity_key": key,
-                            "roles": roles,
-                            "source_refs": [ref],
-                        }
+
+        if candidate.get("type") != "location":
+            continue
+        for evidence in _as_list(candidate.get("event_location_evidence")):
+            if not isinstance(evidence, dict):
+                continue
+            ref = str(evidence.get("source_ref", ""))
+            quote = str(evidence.get("quote", "")).strip()
+            if ref not in messages or not quote or not _evidence_quote_in_text(
+                quote, messages[ref]
+            ):
+                warnings.append(f"{key} 在 {ref} 的实际地点短引无法核对；脚本未写入地点")
+                continue
+            owners = ref_owners.get(ref, [])
+            matching = owners
+            if len(owners) > 1:
+                matching = [
+                    event
+                    for event in owners
+                    if any(
+                        _evidence_quote_in_text(quote, event_slice)
+                        for event_slice in _event_slice_text(event, ref, rounds)
                     )
+                ]
+            if len(matching) != 1:
+                warnings.append(f"{key} 的实际地点依据 {ref} 无法唯一落到一个 Event")
+                continue
+            event = matching[0]
+            related = event.setdefault("related_entity_keys", [])
+            if key not in related:
+                related.append(key)
+            locations = event.setdefault("locations", [])
+            if key not in locations:
+                locations.append(key)
+            occurrences = event.setdefault("location_occurrences", [])
+            if not any(
+                item.get("entity_key") == key and ref in item.get("source_refs", [])
+                for item in occurrences
+                if isinstance(item, dict)
+            ):
+                occurrences.append({"entity_key": key, "source_refs": [ref]})
+
+    for candidate in state.get("relation_candidates", {}).values():
+        pair = sorted(str(key) for key in _as_list(candidate.get("participant_keys")))
+        if len(pair) != 2:
+            continue
+        for evidence in _as_list(candidate.get("event_link_evidence")):
+            if not isinstance(evidence, dict):
+                continue
+            ref = str(evidence.get("source_ref", ""))
+            quote = str(evidence.get("quote", "")).strip()
+            if ref not in messages or not quote or not _evidence_quote_in_text(
+                quote, messages[ref]
+            ):
+                warnings.append(
+                    f"关系 {' / '.join(pair)} 在 {ref} 的短引无法核对；脚本未挂接 Event"
+                )
+                continue
+            owners = ref_owners.get(ref, [])
+            matching = owners
+            if len(owners) > 1:
+                matching = [
+                    event
+                    for event in owners
+                    if any(
+                        _evidence_quote_in_text(quote, event_slice)
+                        for event_slice in _event_slice_text(event, ref, rounds)
+                    )
+                ]
+            if len(matching) != 1:
+                warnings.append(
+                    f"关系 {' / '.join(pair)} 的依据 {ref} 无法唯一落到一个 Event"
+                )
+                continue
+            related_pairs = matching[0].setdefault("related_relation_pairs", [])
+            if pair not in related_pairs:
+                related_pairs.append(pair)
     return _unique(warnings)
 
 
@@ -3331,7 +4694,7 @@ def _character_components(
 
 def _inventory_placement_hints(
     state: dict[str, Any],
-) -> dict[str, dict[str, str]]:
+) -> tuple[dict[str, dict[str, str]], list[str]]:
     """把 Character 提取到的物品栏候选转换为 Item 放置提示。
 
     同一 Item 被多个 Character 同时声明时不猜测持有人；显式 Item Placement 会在
@@ -3362,6 +4725,7 @@ def _inventory_placement_hints(
             )
 
     result: dict[str, dict[str, str]] = {}
+    warnings: list[str] = []
     for item_key, hints in collected.items():
         unique_targets = {item["target_key"] for item in hints}
         if len(unique_targets) == 1:
@@ -3369,11 +4733,10 @@ def _inventory_placement_hints(
                 hints, key=lambda item: role_priority[item["role"]]
             )
         else:
-            _append_warning(
-                state,
+            warnings.append(
                 f"{item_key} 同时出现在多个 Character 物品栏候选中；未自动写入放置事实。",
             )
-    return result
+    return result, warnings
 
 
 def _domain_components(
@@ -3690,19 +5053,10 @@ def _domain_components(
 
     related = []
     for raw in _as_list(data.get("related_concepts")):
-        if not isinstance(raw, dict) or not is_entity_key(
-            raw.get("concept_key"), "concept"
-        ):
+        concept_key = raw.get("concept_key") if isinstance(raw, dict) else raw
+        if not is_entity_key(concept_key, "concept"):
             continue
-        roles = [
-            role
-            for role in _nonempty_strings(raw.get("roles"), 16)
-            if SNAKE_CASE_RE.fullmatch(role)
-        ]
-        if roles:
-            related.append(
-                {"concept_ref": _ref(state, raw["concept_key"]), "relation_roles": roles}
-            )
+        related.append(_ref(state, concept_key))
     if related:
         components["related_concept_reference"] = _envelope({"concept_refs": related})
     return components
@@ -3744,7 +5098,7 @@ def _state_entries(
         kind = str(raw.get("kind", "")).strip()
         description = str(raw.get("description", "")).strip()
         status = raw.get("status")
-        if not SNAKE_CASE_RE.fullmatch(kind) or not description or status not in {
+        if not kind or not description or status not in {
             "active",
             "inactive",
         }:
@@ -3962,12 +5316,14 @@ def _stage_data(
 def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """把批次候选转成现有 Schema 能校验的封闭 Entity 网络。"""
 
-    reconcile_key_detail_actors(state)
-    reconcile_witnessed_memory_participants(state)
-    ensure_minimal_entity_nodes(state)
+    projection_warnings = [
+        *reconcile_key_detail_entities(state),
+        *ensure_minimal_entity_nodes(state),
+    ]
     timestamp = state["run_timestamp"]
     entities: list[dict[str, Any]] = []
-    placement_hints = _inventory_placement_hints(state)
+    placement_hints, placement_warnings = _inventory_placement_hints(state)
+    projection_warnings.extend(placement_warnings)
 
     for candidate_key, candidate in sorted(state["entity_candidates"].items()):
         entity_type = entity_type_from_key(candidate_key)
@@ -3984,6 +5340,9 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
                 },
             },
         }
+        facts = candidate.get("facts")
+        if isinstance(facts, dict) and facts:
+            components["entity_facts"] = _envelope({"facts": deepcopy(facts)})
         if entity_type == "character":
             components.update(_character_components(state, candidate_key, candidate))
         else:
@@ -4002,6 +5361,11 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
             }
         )
 
+    relation_formal_ids = {
+        key: _mapped_id(state, "relation", key, "character_relation")
+        for key, candidate in state["relation_candidates"].items()
+        if len(_as_list(candidate.get("participant_keys"))) == 2
+    }
     event_formal_ids: dict[str, str] = {}
     for event in state["events"]:
         event_id = _mapped_id(state, "event", event["id"], "event")
@@ -4009,6 +5373,46 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
         components: dict[str, Any] = {
             "entity_management": _management(timestamp),
         }
+        story_summary = str(event.get("story_summary", "")).strip()
+        status = str(event.get("status", "")).strip()
+        if story_summary and status in {
+            "forming",
+            "pending_finalization",
+            "finalized",
+        }:
+            key_details: list[dict[str, Any]] = []
+            for detail in event.get("key_details", []):
+                if not isinstance(detail, dict):
+                    continue
+                kind = str(detail.get("kind", "")).strip()
+                content = str(detail.get("content", "")).strip()
+                fidelity = str(detail.get("fidelity", "paraphrase")).strip()
+                if kind not in {"statement", "action"} or not content:
+                    continue
+                if fidelity not in {"verbatim", "paraphrase"}:
+                    fidelity = "paraphrase"
+                detail_key = str(detail.get("id", "")).strip() or content
+                detail_record: dict[str, Any] = {
+                    "detail_id": _mapped_local_id(
+                        state,
+                        f"{event['id']}:{detail_key}",
+                        "event_detail",
+                    ),
+                    "kind": kind,
+                    "content": content,
+                    "fidelity": fidelity,
+                }
+                actor_key = str(detail.get("actor", "")).strip()
+                if is_entity_key(actor_key, "character"):
+                    detail_record["actor_ref"] = _ref(state, actor_key)
+                key_details.append(detail_record)
+            components["event_content"] = _envelope(
+                {
+                    "status": status,
+                    "story_summary": story_summary,
+                    "key_details": key_details,
+                }
+            )
         event_time = event.get("event_time")
         if isinstance(event_time, dict) and isinstance(event_time.get("start_time"), dict):
             time_data = {"start_time": deepcopy(event["event_time"]["start_time"])}
@@ -4023,17 +5427,9 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
             key = item.get("entity_key") if isinstance(item, dict) else None
             if not is_entity_key(key, "location"):
                 continue
-            roles = [
-                role
-                for role in _unique(_as_list(item.get("roles")))
-                if role in LOCATION_ROLES
-            ]
-            if not roles:
-                roles = ["primary"]
             occurrences.append(
                 {
                     "location_ref": _ref(state, key),
-                    "location_roles": roles,
                     "sequence": sequence,
                 }
             )
@@ -4042,61 +5438,39 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
                 "schema_version": "0.1.0",
                 "data": {"location_refs": occurrences},
             }
-        participant_keys = _unique(
-            key
-            for key in event.get("participants", [])
-            if is_entity_key(key, "character")
-        )
-        if participant_keys:
-            components["event_participant_reference"] = {
-                "schema_version": "0.1.0",
-                "data": {
-                    "participant_refs": [
-                        {
-                            "participant_ref": _ref(state, key),
-                            "participation_roles": ["participant"],
-                        }
-                        for key in participant_keys
-                    ]
-                },
-            }
         related_entity_keys = _unique(
             key
             for key in event.get("related_entity_keys", [])
             if entity_type_from_key(key)
-            in {"item", "organization", "skill", "concept"}
+            in {"character", "location", "item", "organization", "skill", "concept"}
         )
-        if related_entity_keys:
+        related_refs = [_ref(state, key) for key in related_entity_keys]
+        for pair in event.get("related_relation_pairs", []):
+            relation_id = relation_formal_ids.get(relation_key(pair))
+            if relation_id:
+                related_refs.append({"id": relation_id, "type": "character_relation"})
+        related_refs = _unique(related_refs)
+        if related_refs:
             components["event_related_entity_reference"] = {
                 "schema_version": "0.1.0",
-                "data": {
-                    "related_entity_refs": [
-                        {
-                            "related_entity_ref": _ref(state, key),
-                            "involvement_roles": ["involved"],
-                        }
-                        for key in related_entity_keys
-                    ]
-                },
+                "data": {"related_entity_refs": related_refs},
             }
         entities.append(
             {
                 "id": event_id,
                 "type": "event",
                 "description": str(event.get("description", "")).strip()
-                or str(event.get("title", "")).strip()
+                or str(event.get("story_summary", "")).strip()
                 or "形成中的叙事事件。",
                 "components": components,
             }
         )
 
-    relation_formal_ids: dict[str, str] = {}
     relation_aspect_ids: dict[str, list[str]] = {}
     for key, candidate in sorted(state["relation_candidates"].items()):
-        relation_id = _mapped_id(state, "relation", key, "character_relation")
-        relation_formal_ids[key] = relation_id
+        relation_id = relation_formal_ids.get(key)
         participant_keys = sorted(candidate.get("participant_keys", []))
-        if len(participant_keys) != 2:
+        if len(participant_keys) != 2 or relation_id is None:
             continue
         participant_refs = sorted(
             (_ref(state, candidate_key) for candidate_key in participant_keys),
@@ -4114,7 +5488,7 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
                 continue
             kind = str(raw_aspect.get("kind", "")).strip()
             description = str(raw_aspect.get("description", "")).strip()
-            if not SNAKE_CASE_RE.fullmatch(kind) or not description:
+            if not kind or not description:
                 continue
             aspect_id = _mapped_local_id(state, f"{key}:{kind}", "relation_aspect")
             aspect_ids.append(aspect_id)
@@ -4166,7 +5540,7 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
             tags = [
                 str(tag)
                 for tag in _as_list(direction.get("tags"))
-                if SNAKE_CASE_RE.fullmatch(str(tag))
+                if str(tag).strip()
             ]
             if tags:
                 item["tags"] = _unique(tags)
@@ -4183,18 +5557,21 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
                         "schema_version": "0.1.0",
                         "data": {"participant_refs": participant_refs},
                     },
-                    "character_relation_aspects": {
-                        "schema_version": "0.1.0",
-                        "data": {"aspects": aspects},
-                    },
-                    "character_relation_state": {
-                        "schema_version": "0.1.0",
-                        "data": {"directional_states": directional_states},
-                    },
-                    "history_index": {
-                        "schema_version": "0.1.0",
-                        "data": {"event_refs": []},
-                    },
+                    **(
+                        {"character_relation_aspects": _envelope({"aspects": aspects})}
+                        if aspects
+                        else {}
+                    ),
+                    **(
+                        {"character_relation_state": _envelope({"directional_states": directional_states})}
+                        if directional_states
+                        else {}
+                    ),
+                    **(
+                        {"entity_facts": _envelope({"facts": deepcopy(candidate["facts"])})}
+                        if isinstance(candidate.get("facts"), dict) and candidate["facts"]
+                        else {}
+                    ),
                 },
             }
         )
@@ -4262,8 +5639,9 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
     projected = rebuild_derived_indexes(entities)
     report = EntityNetworkValidator(ROOT).validate(
         projected, require_derived_indexes=True
-    )
-    return projected, report.to_dict()
+    ).to_dict()
+    report["warnings"] = _unique(projection_warnings)
+    return projected, report
 
 
 def _task_summary(task_result: dict[str, Any]) -> dict[str, Any]:
@@ -4275,6 +5653,10 @@ def _task_summary(task_result: dict[str, Any]) -> dict[str, Any]:
         "ok": task_result.get("ok"),
         "elapsed_seconds": task_result.get("elapsed_seconds"),
         "candidate_attempts": len(attempts),
+        "targeted_content_repairs": sum(
+            attempt.get("attempt_kind") == "locked_boundary_content_repair"
+            for attempt in attempts
+        ),
         "transport_failures": sum(
             len(attempt.get("transport_failures", [])) for attempt in attempts
         ),
@@ -4304,6 +5686,8 @@ def render_record(run: dict[str, Any]) -> str:
         "",
         "> 本文件由测试工具持续覆盖写入；一场运行只产生这一份公开记录。",
         "> 不保存 API 密钥，也不请求或记录模型隐藏思维过程。",
+        "> 提示词、模型原回复、耗时、修复与告警属于测试运行记录，不是数据库数据。",
+        "> 数据库候选只服务召回与维护；恢复检查点另存且只保留中断续跑所需内容。",
         "",
         "## 1. 运行范围",
         "",
@@ -4349,7 +5733,7 @@ def render_record(run: dict[str, Any]) -> str:
                     f"- 推理字符／正式正文字符：{api.get('reasoning_chars', 0)}／{api.get('content_chars', 0)}",
                     f"- 人工边界对照：`{item.get('gold_evaluation', {}).get('status', '未形成可比较结果')}`",
                     "",
-                    "<details><summary>完整系统提示词</summary>",
+                    "<details><summary>运行记录：完整系统提示词</summary>",
                     "",
                     _pre(task.get("system_prompt", "")),
                     "</details>",
@@ -4360,17 +5744,17 @@ def render_record(run: dict[str, Any]) -> str:
                 number = attempt.get("candidate_attempt")
                 lines.extend(
                     [
-                        f"<details><summary>第 {number} 次候选：完整用户提示词</summary>",
+                        f"<details><summary>运行记录：第 {number} 次候选完整用户提示词</summary>",
                         "",
                         _pre(attempt.get("user_prompt", "")),
                         "</details>",
                         "",
-                        f"<details><summary>第 {number} 次候选：模型完整正式回复</summary>",
+                        f"<details><summary>运行记录：第 {number} 次候选模型完整正式回复</summary>",
                         "",
                         _pre(attempt.get("raw", "")),
                         "</details>",
                         "",
-                        f"<details><summary>第 {number} 次候选：解析、接口与检查结果</summary>",
+                        f"<details><summary>运行记录：第 {number} 次候选解析、接口与检查结果</summary>",
                         "",
                         _pre(
                             {
@@ -4405,7 +5789,8 @@ def render_record(run: dict[str, Any]) -> str:
                 summary = _task_summary(batch["tasks"][task_name])
                 lines.append(
                     f"- {task_name}：{'通过' if summary['ok'] else '失败'}；"
-                    f"{summary['elapsed_seconds']} 秒；候选 {summary['candidate_attempts']} 次；"
+                    f"{summary['elapsed_seconds']} 秒；模型调用 {summary['candidate_attempts']} 次；"
+                    f"锁定边界补写 {summary['targeted_content_repairs']} 次；"
                     f"传输失败 {summary['transport_failures']} 次"
                 )
         network = batch.get("network_validation")
@@ -4434,7 +5819,7 @@ def render_record(run: dict[str, Any]) -> str:
                 [
                     f"#### {task_name} 任务",
                     "",
-                    "<details><summary>完整系统提示词</summary>",
+                    "<details><summary>运行记录：完整系统提示词</summary>",
                     "",
                     _pre(task.get("system_prompt", "")),
                     "</details>",
@@ -4445,17 +5830,17 @@ def render_record(run: dict[str, Any]) -> str:
                 attempt_number = attempt.get("candidate_attempt")
                 lines.extend(
                     [
-                        f"<details><summary>第 {attempt_number} 次候选：完整用户提示词</summary>",
+                        f"<details><summary>运行记录：第 {attempt_number} 次候选完整用户提示词</summary>",
                         "",
                         _pre(attempt.get("user_prompt", "")),
                         "</details>",
                         "",
-                        f"<details><summary>第 {attempt_number} 次候选：模型完整正式回复</summary>",
+                        f"<details><summary>运行记录：第 {attempt_number} 次候选模型完整正式回复</summary>",
                         "",
                         _pre(attempt.get("raw", "")),
                         "</details>",
                         "",
-                        f"<details><summary>第 {attempt_number} 次候选：解析、接口与检查结果</summary>",
+                        f"<details><summary>运行记录：第 {attempt_number} 次候选解析、接口与检查结果</summary>",
                         "",
                         _pre(
                             {
@@ -4486,7 +5871,9 @@ def render_record(run: dict[str, Any]) -> str:
                             "binding_warnings": batch.get("binding_warnings", []),
                             "stub_warnings": batch.get("stub_warnings", []),
                             "network_validation": batch.get("network_validation"),
-                            "state_after_batch": batch.get("state_after_batch"),
+                            "database_state_summary": batch.get(
+                                "database_state_summary", {}
+                            ),
                         }
                     ),
                     "",
@@ -4501,9 +5888,9 @@ def render_record(run: dict[str, Any]) -> str:
             "",
             _pre(run.get("gold_evaluation", {})),
             "",
-            "### 4.2 最终候选状态",
+            "### 4.2 数据库候选快照（召回与维护数据）",
             "",
-            _pre(run.get("final_state", {})),
+            _pre(database_report_view(run.get("final_state", {}))),
             "",
         ]
     )
@@ -4525,6 +5912,24 @@ def render_record(run: dict[str, Any]) -> str:
                 "",
             ]
         )
+    checkpoint_heading = (
+        "### 4.3 恢复检查点（运行记录，不是数据库）"
+        if event_only
+        else "### 4.5 恢复检查点（运行记录，不是数据库）"
+    )
+    lines.extend(
+        [
+            checkpoint_heading,
+            "",
+            "> 仅用于测试中断后继续；只保留最后一次已提交状态，并已去除句子切分、已解决边界历史和累计告警。",
+            "",
+            "<details><summary>展开最小恢复检查点</summary>",
+            "",
+            _pre({"checkpoint_state": run.get("checkpoint_state", {})}),
+            "</details>",
+            "",
+        ]
+    )
     lines.extend(
         [
             "## 5. 场外复核",
@@ -4579,10 +5984,101 @@ def persist_single_record(run: dict[str, Any], output: Path, api_key: str) -> No
             time.sleep(0.2 * (2**attempt))
 
 
-def public_state(state: dict[str, Any]) -> dict[str, Any]:
-    """记录候选语义和映射，不写入任何认证或调用内部对象。"""
+SOURCE_RECORD_FIELDS = (
+    "source_ref",
+    "view_version",
+    "role",
+    "speaker",
+    "source_line",
+    "content",
+    "content_sha256",
+)
 
-    return deepcopy(state)
+
+def _compact_source_records(value: Any) -> dict[str, dict[str, Any]]:
+    """把旧检查点也收敛为一条消息一条记录，丢弃句子级临时切分。"""
+
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for key, record in value.items():
+        if not isinstance(record, dict):
+            continue
+        compact = {
+            field: deepcopy(record[field])
+            for field in SOURCE_RECORD_FIELDS
+            if field in record
+        }
+        source_ref = str(compact.get("source_ref") or key)
+        compact["source_ref"] = source_ref
+        result[source_ref] = compact
+    return result
+
+
+def database_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    """正式数据候选：只保留召回与维护需要的 Event、Memory 和消息原文。"""
+
+    return {
+        "events": deepcopy(_as_list(state.get("events"))),
+        "memories": deepcopy(_as_list(state.get("memories"))),
+        "source_records": _compact_source_records(state.get("source_records")),
+    }
+
+
+def runtime_checkpoint(state: dict[str, Any]) -> dict[str, Any]:
+    """中断恢复所需状态；它是运行记录，不是正式数据库内容。"""
+
+    checkpoint = deepcopy(state)
+    checkpoint["source_records"] = _compact_source_records(
+        checkpoint.get("source_records")
+    )
+    checkpoint.pop("boundary_workspace_history", None)
+    checkpoint.pop("warnings", None)
+    return checkpoint
+
+
+def database_report_view(state: dict[str, Any]) -> dict[str, Any]:
+    """测试记录中的紧凑数据库视图；原文正文不在报告中重复展开。"""
+
+    snapshot = database_snapshot(state)
+    source_records = snapshot.pop("source_records")
+    snapshot["source_record_index"] = {
+        "message_count": len(source_records),
+        "total_content_chars": sum(
+            len(str(record.get("content", ""))) for record in source_records.values()
+        ),
+        "source_refs": list(source_records),
+        "view_versions": _unique(
+            record.get("view_version")
+            for record in source_records.values()
+            if record.get("view_version")
+        ),
+    }
+    return snapshot
+
+
+def state_report_summary(state: dict[str, Any]) -> dict[str, Any]:
+    """每批只展示规模和活动槽位，避免重复整份数据库。"""
+
+    status_counts: dict[str, int] = {}
+    for event in _as_list(state.get("events")):
+        if not isinstance(event, dict):
+            continue
+        status = str(event.get("status", "unknown"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+    return {
+        "event_count": len(_as_list(state.get("events"))),
+        "event_status_counts": status_counts,
+        "memory_count": len(_as_list(state.get("memories"))),
+        "source_message_count": len(
+            state.get("source_records", {})
+            if isinstance(state.get("source_records"), dict)
+            else {}
+        ),
+        "active_boundary_candidate_count": len(
+            _as_list(state.get("boundary_workspace"))
+        ),
+    }
 
 
 def _record_generations(record: str) -> list[str]:
@@ -4744,7 +6240,10 @@ def recovery_state_and_current_plans(
     state_candidates: list[tuple[int, int, dict[str, Any]]] = []
     for generation_index, values in enumerate(objects_by_generation):
         for value_index, value in enumerate(values):
-            candidate = value.get("state_after_batch")
+            candidate = value.get("checkpoint_state")
+            if not isinstance(candidate, dict):
+                # 兼容旧测试记录；新记录不再逐批持久化整份状态。
+                candidate = value.get("state_after_batch")
             if isinstance(candidate, dict) and isinstance(
                 candidate.get("events"), list
             ):
@@ -4959,7 +6458,8 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
         "batches": [],
         "gold_evaluation": {},
         "type_counts": {},
-        "final_state": {},
+        "final_state": database_snapshot(state),
+        "checkpoint_state": runtime_checkpoint(state),
         "final_network": [],
         "final_network_validation": {},
         "preflight_record": prior_record,
@@ -4987,6 +6487,43 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
                 )
                 reused_names.append(name)
                 continue
+            repair_builder = spec.get("repair_prompt_builder")
+            repair_merger = spec.get("repair_plan_merger")
+            repair_prompt = (
+                repair_builder(normalized, errors)
+                if repair_builder is not None and repair_merger is not None
+                else None
+            )
+            if repair_prompt:
+                print(f"恢复批次锁定已有边界，只补取 {name} 缺失内容", flush=True)
+                locked_plan = deepcopy(normalized)
+                batch["tasks"][name] = run_model_task(
+                    task=name,
+                    endpoint=args.endpoint,
+                    api_key=api_key,
+                    model=args.model,
+                    system_prompt=spec["system_prompt"],
+                    user_prompt=repair_prompt,
+                    timeout=args.timeout,
+                    max_tokens=spec["max_tokens"],
+                    thinking_mode=spec["thinking_mode"],
+                    response_format=spec["response_format"],
+                    stream_idle_timeout=args.stream_idle_timeout,
+                    content_start_timeout=args.content_start_timeout,
+                    candidate_attempt_limit=1,
+                    transport_attempt_limit=args.transport_attempt_limit,
+                    normalizer=(
+                        lambda response, lp=locked_plan, merger=repair_merger,
+                        normalizer=spec["normalizer"]: normalizer(
+                            merger(lp, response)
+                        )
+                    ),
+                    validator=spec["validator"],
+                )
+                called_names.append(name)
+                persist_single_record(run, output, api_key)
+                if batch["tasks"][name].get("ok"):
+                    continue
         called_names.append(name)
         print(f"恢复批次只补取 {name}", flush=True)
         batch["tasks"][name] = run_model_task(
@@ -5006,6 +6543,8 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
             transport_attempt_limit=args.transport_attempt_limit,
             normalizer=spec["normalizer"],
             validator=spec["validator"],
+            repair_prompt_builder=spec.get("repair_prompt_builder"),
+            repair_plan_merger=spec.get("repair_plan_merger"),
         )
         persist_single_record(run, output, api_key)
 
@@ -5013,13 +6552,14 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
     if not all(batch["tasks"].get(name, {}).get("ok") for name in task_specs):
         batch["status"] = "task_recovery_failed"
         run["status"] = "failed"
-        run["final_state"] = public_state(state)
+        run["final_state"] = database_snapshot(state)
+        run["checkpoint_state"] = runtime_checkpoint(state)
         run["checkpoint_round_end"] = processed_round_end
         persist_single_record(run, output, api_key)
         return run
 
     event_plan = batch["tasks"]["event"]["plan"]
-    candidate_state, operations, _ = apply_event_candidate(state, event_plan)
+    candidate_state, operations, _ = apply_event_candidate(state, event_plan, rounds)
     binding_warnings: list[str] = []
     stub_warnings: list[str] = []
     if args.task_set == "full":
@@ -5045,7 +6585,7 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
     batch["binding_warnings"] = binding_warnings
     batch["stub_warnings"] = stub_warnings
     batch["network_validation"] = report
-    batch["state_after_batch"] = public_state(candidate_state)
+    batch["database_state_summary"] = state_report_summary(candidate_state)
     batch["status"] = "committed_after_task_recovery" if report.get("valid") else "network_validation_failed"
     counts: dict[str, int] = {}
     for entity in network:
@@ -5053,7 +6593,8 @@ def recover_final_batch(args: argparse.Namespace) -> dict[str, Any]:
     run["status"] = "completed" if report.get("valid") else "failed"
     run["checkpoint_round_end"] = rounds[-1]["round"]
     run["completed_at"] = datetime.now(timezone.utc).isoformat()
-    run["final_state"] = public_state(candidate_state)
+    run["final_state"] = database_snapshot(candidate_state)
+    run["checkpoint_state"] = runtime_checkpoint(candidate_state)
     run["final_network"] = network
     run["final_network_validation"] = report
     run["type_counts"] = counts
@@ -5139,7 +6680,7 @@ def finalize_recovered_offline(args: argparse.Namespace) -> dict[str, Any]:
     if errors:
         raise RuntimeError("离线封存复验失败：" + "; ".join(errors))
 
-    candidate_state, operations, _ = apply_event_candidate(state, event_plan)
+    candidate_state, operations, _ = apply_event_candidate(state, event_plan, rounds)
     candidate_state, binding_warnings = apply_memory_candidates(
         candidate_state, memory_plan, rounds
     )
@@ -5178,7 +6719,7 @@ def finalize_recovered_offline(args: argparse.Namespace) -> dict[str, Any]:
         "binding_warnings": binding_warnings,
         "stub_warnings": stub_warnings,
         "network_validation": report,
-        "state_after_batch": public_state(candidate_state),
+        "database_state_summary": state_report_summary(candidate_state),
     }
     counts: dict[str, int] = {}
     for entity in network:
@@ -5211,7 +6752,8 @@ def finalize_recovered_offline(args: argparse.Namespace) -> dict[str, Any]:
         "batches": [batch],
         "gold_evaluation": {},
         "type_counts": counts,
-        "final_state": public_state(candidate_state),
+        "final_state": database_snapshot(candidate_state),
+        "checkpoint_state": runtime_checkpoint(candidate_state),
         "final_network": network,
         "final_network_validation": report,
         "preflight_record": prior_record,
@@ -5280,7 +6822,8 @@ def run_thinking_calibration(args: argparse.Namespace) -> dict[str, Any]:
         "batches": [],
         "gold_evaluation": {},
         "type_counts": {},
-        "final_state": {},
+        "final_state": database_snapshot(base_state),
+        "checkpoint_state": runtime_checkpoint(base_state),
         "final_network": [],
         "final_network_validation": {},
         "preflight_record": preflight_record,
@@ -5309,14 +6852,20 @@ def run_thinking_calibration(args: argparse.Namespace) -> dict[str, Any]:
             validator=lambda plan, s=base_state, r=rounds: validate_event_plan(
                 plan, s, r
             ),
+            repair_prompt_builder=(
+                lambda plan, errors, s=base_state, r=rounds: build_event_content_repair_prompt(
+                    plan, errors, s, r
+                )
+            ),
+            repair_plan_merger=merge_event_content_repair,
         )
         item: dict[str, Any] = {"mode": mode, "task": result}
         if result.get("ok"):
             candidate_state, operations, _ = apply_event_candidate(
-                base_state, result["plan"]
+                base_state, result["plan"], rounds
             )
             item["operations"] = operations
-            item["state"] = public_state(candidate_state)
+            item["state"] = database_report_view(candidate_state)
             if gold is not None:
                 item["gold_evaluation"] = evaluate_state_against_gold(
                     candidate_state, gold, rounds[-1]["round"]
@@ -5406,7 +6955,8 @@ def run_probe(
         "batches": [],
         "gold_evaluation": {},
         "type_counts": {},
-        "final_state": {},
+        "final_state": database_snapshot(state),
+        "checkpoint_state": runtime_checkpoint(state),
         "final_network": [],
         "final_network_validation": {},
         "preflight_record": preflight_record,
@@ -5521,7 +7071,8 @@ def run_probe(
             batch["status"] = "failed_before_commit"
             batch["elapsed_seconds"] = round(time.perf_counter() - batch_started, 3)
             run["status"] = "failed"
-            run["final_state"] = public_state(state)
+            run["final_state"] = database_snapshot(state)
+            run["checkpoint_state"] = runtime_checkpoint(state)
             run["checkpoint_round_end"] = processed_round_end
             if gold is not None:
                 run["gold_evaluation"] = evaluate_state_against_gold(
@@ -5531,7 +7082,9 @@ def run_probe(
             return run
 
         event_plan = batch["tasks"]["event"]["plan"]
-        candidate_state, operations, _ = apply_event_candidate(snapshot, event_plan)
+        candidate_state, operations, _ = apply_event_candidate(
+            snapshot, event_plan, rounds
+        )
         binding_warnings: list[str] = []
         stub_warnings: list[str] = []
         if args.task_set == "full":
@@ -5553,12 +7106,13 @@ def run_probe(
         batch["binding_warnings"] = binding_warnings
         batch["stub_warnings"] = stub_warnings
         batch["network_validation"] = network_report
-        batch["state_after_batch"] = public_state(candidate_state)
+        batch["database_state_summary"] = state_report_summary(candidate_state)
         batch["elapsed_seconds"] = round(time.perf_counter() - batch_started, 3)
         if not network_report.get("valid"):
             batch["status"] = "network_validation_failed"
             run["status"] = "failed"
-            run["final_state"] = public_state(candidate_state)
+            run["final_state"] = database_snapshot(state)
+            run["checkpoint_state"] = runtime_checkpoint(state)
             run["final_network"] = network
             run["final_network_validation"] = network_report
             persist_single_record(run, output, api_key)
@@ -5567,6 +7121,8 @@ def run_probe(
         state = candidate_state
         processed_round_end = rounds[-1]["round"]
         run["checkpoint_round_end"] = processed_round_end
+        run["final_state"] = database_snapshot(state)
+        run["checkpoint_state"] = runtime_checkpoint(state)
         batch["status"] = "committed"
         commit_label = (
             "Event 状态"
@@ -5588,7 +7144,8 @@ def run_probe(
         counts[entity["type"]] = counts.get(entity["type"], 0) + 1
     run["status"] = "completed" if final_report.get("valid") else "failed"
     run["completed_at"] = datetime.now(timezone.utc).isoformat()
-    run["final_state"] = public_state(state)
+    run["final_state"] = database_snapshot(state)
+    run["checkpoint_state"] = runtime_checkpoint(state)
     run["final_network"] = final_network
     run["final_network_validation"] = final_report
     run["type_counts"] = counts

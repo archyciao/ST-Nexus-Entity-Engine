@@ -946,7 +946,17 @@ def validate_boundary_plan(
     if disposition == "keep_distinct" and forming is None:
         errors.append("keep_distinct 需要已有生成中 Event")
 
-    message_map = current_message_map(rounds)
+    source_roles = plan.get("source_roles")
+    if isinstance(source_roles, list) and source_roles:
+        allowed_roles = {str(role) for role in source_roles}
+        message_map = {
+            str(message["ref"]): str(message["content"])
+            for message in batch_messages(rounds)
+            if str(message.get("role", "")) in allowed_roles
+        }
+    else:
+        # 旧记录没有 source_roles，仍按完整 user + assistant 来源验证。
+        message_map = current_message_map(rounds)
     valid_refs = set(message_map)
     segments = plan.get("segments")
     if not isinstance(segments, list) or not segments:
@@ -1237,9 +1247,13 @@ def validate_content_plan(
                     f"event_updates[{index}].new_key_details[{detail_index}] 来源不属于 {slot}"
                 )
                 continue
-            if content and not any(
+            if (
+                content
+                and detail.get("fidelity") != "paraphrase"
+                and not any(
                 quote_in_text(content, assigned_text.get(slot, {}).get(ref, ""))
                 for ref in refs
+                )
             ):
                 warnings.append(
                     f"{slot} 的关键细节 {detail_index + 1} 不是可直接核对的连续原文"
@@ -1285,6 +1299,32 @@ def merge_forming_into_pending(
         "description": forming.get("description", ""),
         "story_summary": forming.get("story_summary", ""),
     }
+
+    def merge_text(left: Any, right: Any, separator: str) -> str:
+        left_text = str(left or "").strip()
+        right_text = str(right or "").strip()
+        if not left_text:
+            return right_text
+        if not right_text:
+            return left_text
+        left_compact = re.sub(r"[\W_]+", "", left_text, flags=re.UNICODE)
+        right_compact = re.sub(r"[\W_]+", "", right_text, flags=re.UNICODE)
+        if right_compact and right_compact in left_compact:
+            return left_text
+        if left_compact and left_compact in right_compact:
+            return right_text
+        if separator == "\n":
+            return left_text.rstrip() + separator + right_text
+        return left_text.rstrip("；。\n ") + separator + right_text
+
+    # 合并是固定状态操作，不能把已经生成的事实留在过程字段里等模型重写。
+    # Summary 完整串接；Description 只串接两段模型已写好的短说明，不重新概括。
+    pending["story_summary"] = merge_text(
+        pending.get("story_summary"), forming.get("story_summary"), "\n"
+    )
+    pending["description"] = merge_text(
+        pending.get("description"), forming.get("description"), "；"
+    )
     unique_extend(pending["source_refs"], forming.get("source_refs", []))
     unique_extend(pending["participants"], forming.get("participants", []))
     unique_extend(pending["locations"], forming.get("locations", []))
@@ -1357,15 +1397,17 @@ def apply_event_update(
             continue
         number = state["next_detail_number"]
         state["next_detail_number"] += 1
-        selected_details.append(
-            {
-                "id": f"detail_probe_{number:03d}",
-                "kind": detail.get("kind", "scene"),
-                "content": str(detail.get("content", "")).strip(),
-                "actor": str(detail.get("actor", "")).strip(),
-                "source_refs": list(detail.get("source_refs") or []),
-            }
-        )
+        detail_record = {
+            "id": f"detail_probe_{number:03d}",
+            "kind": detail.get("kind", "scene"),
+            "content": str(detail.get("content", "")).strip(),
+            "fidelity": str(detail.get("fidelity", "paraphrase")),
+            "actor": str(detail.get("actor", "")).strip(),
+            "source_refs": list(detail.get("source_refs") or []),
+        }
+        if detail.get("source_unit_refs"):
+            detail_record["source_unit_refs"] = list(detail["source_unit_refs"])
+        selected_details.append(detail_record)
     event["key_details"] = selected_details
 
 

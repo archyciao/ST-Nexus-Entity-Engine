@@ -67,11 +67,8 @@
           "data": {
             "event_refs": [
               {
-                "event_ref": {
-                  "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
-                  "type": "event"
-                },
-                "index_roles": ["recent", "important"]
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
               }
             ]
           }
@@ -144,11 +141,8 @@
           "data": {
             "event_refs": [
               {
-                "event_ref": {
-                  "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
-                  "type": "event"
-                },
-                "index_roles": ["recent", "important"]
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
               }
             ]
           }
@@ -182,7 +176,7 @@
     {
       "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
       "type": "event",
-      "description": "沈砚与顾青在青崖山门合力击退伏击者；顾青替沈砚挡下暗箭，二人的临时同行转为经共同风险确认的信任。",
+      "description": "沈砚与顾青在青崖山门合力击退伏击者，并因互相救援建立信任。",
       "components": {
         "entity_management": {
           "schema_version": "0.2.0",
@@ -192,6 +186,25 @@
             "data_source": "system_generated",
             "revision": 1,
             "lifecycle_status": "active"
+          }
+        },
+        "event_content": {
+          "schema_version": "0.1.0",
+          "data": {
+            "status": "finalized",
+            "story_summary": "沈砚与顾青在青崖山门遭到伏击。两人协力迎敌，顾青替沈砚挡下暗箭，沈砚随即掩护顾青反击，最终击退袭击者。这次共同承担风险使二人的临时同行转为明确的互相信任。",
+            "key_details": [
+              {
+                "detail_id": "event_detail_01K2ABCDEFGHJKMNPQRSTV0108",
+                "kind": "action",
+                "content": "顾青抢上一步替沈砚挡下暗箭。",
+                "fidelity": "paraphrase",
+                "actor_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                }
+              }
+            ]
           }
         },
         "event_time": {
@@ -216,29 +229,26 @@
                   "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
                   "type": "location"
                 },
-                "location_roles": ["primary"],
                 "sequence": 0
               }
             ]
           }
         },
-        "event_participant_reference": {
+        "event_related_entity_reference": {
           "schema_version": "0.1.0",
           "data": {
-            "participant_refs": [
+            "related_entity_refs": [
               {
-                "participant_ref": {
-                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
-                  "type": "character"
-                },
-                "participation_roles": ["actor", "observer"]
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                "type": "character"
               },
               {
-                "participant_ref": {
-                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
-                  "type": "character"
-                },
-                "participation_roles": ["actor", "protector", "observer"]
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                "type": "character"
+              },
+              {
+                "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
+                "type": "location"
               }
             ]
           }
@@ -440,11 +450,8 @@
           "data": {
             "event_refs": [
               {
-                "event_ref": {
-                  "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
-                  "type": "event"
-                },
-                "index_roles": ["aspect_started", "important"]
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
               }
             ]
           }

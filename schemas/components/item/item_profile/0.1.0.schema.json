@@ -13,7 +13,7 @@
         "data": {
           "type": "object",
           "properties": {
-            "item_kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "item_kind": { "type": "string", "minLength": 1, "maxLength": 120 },
             "instance_mode": { "enum": ["unique", "individual", "stack"] },
             "primary_functions": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true },
             "materials": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 200 }, "uniqueItems": true },

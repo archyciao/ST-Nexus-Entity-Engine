@@ -3,11 +3,8 @@
   "data": {
     "related_entity_refs": [
       {
-        "related_entity_ref": {
-          "id": "item_01K2ABCDEFGHJKMNPQRSTV0009",
-          "type": "item"
-        },
-        "involvement_roles": ["involved"]
+        "id": "item_01K2ABCDEFGHJKMNPQRSTV0009",
+        "type": "item"
       }
     ]
   }

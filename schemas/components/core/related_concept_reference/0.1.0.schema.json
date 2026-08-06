@@ -15,19 +15,12 @@
           "properties": {
             "concept_refs": {
               "type": "array",
+              "uniqueItems": true,
               "items": {
-                "type": "object",
-                "properties": {
-                  "concept_ref": {
-                    "allOf": [
-                      { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
-                      { "type": "object", "properties": { "type": { "const": "concept" } } }
-                    ]
-                  },
-                  "relation_roles": { "type": "array", "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" }, "minItems": 1, "uniqueItems": true }
-                },
-                "required": ["concept_ref", "relation_roles"],
-                "additionalProperties": false
+                "allOf": [
+                  { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                  { "type": "object", "properties": { "type": { "const": "concept" } } }
+                ]
               }
             }
           },

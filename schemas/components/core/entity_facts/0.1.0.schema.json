@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:core:entity_facts:0.1.0",
+  "title": "EntityFactsComponent 0.1.0",
+  "description": "保存不承担身份、引用、关系或控制职责的开放事实资料。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "facts": {
+              "type": "object",
+              "minProperties": 1,
+              "additionalProperties": true,
+              "description": "按对象实际资料开放填写；字段名应清楚稳定，值可以是文字、数字、布尔值、数组或嵌套对象。"
+            }
+          },
+          "required": ["facts"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

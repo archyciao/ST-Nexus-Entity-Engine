@@ -119,9 +119,7 @@ class EntityNetworkValidator:
         errors.extend(_validate_character_skill_stage_links(entity_list, by_id))
         errors.extend(_validate_memory_network_requirements(entity_list, by_id))
         errors.extend(_validate_memory_reference_ownership(entity_list, by_id))
-        errors.extend(_validate_witnessed_memory_participation(entity_list, by_id))
         errors.extend(_validate_relation_memory_ownership(entity_list, by_id))
-        errors.extend(_validate_event_participant_uniqueness(entity_list))
         errors.extend(_validate_event_related_entity_uniqueness(entity_list))
         errors.extend(_validate_event_location_sequence_uniqueness(entity_list))
         errors.extend(_validate_item_placement_network(entity_list, by_id))
@@ -236,9 +234,7 @@ def rebuild_derived_indexes(
 
     memories_by_owner: dict[str, set[str]] = defaultdict(set)
     memories_by_event: dict[str, set[str]] = defaultdict(set)
-    events_by_character: dict[str, set[str]] = defaultdict(set)
-    events_by_location: dict[str, set[str]] = defaultdict(set)
-    events_by_related_entity: dict[str, set[str]] = defaultdict(set)
+    events_by_entity: dict[str, set[str]] = defaultdict(set)
     relations_by_character: dict[str, set[str]] = defaultdict(set)
     relation_memory_links: dict[str, dict[str, dict[str, set[str]]]] = defaultdict(dict)
     child_locations: dict[str, set[str]] = defaultdict(set)
@@ -287,14 +283,6 @@ def rebuild_derived_indexes(
                 )
 
         elif entity_type == "event":
-            for entry in _component_data(entity, "event_participant_reference").get(
-                "participant_refs", []
-            ):
-                participant_id = _reference_id(
-                    entry.get("participant_ref") if isinstance(entry, dict) else None
-                )
-                if participant_id is not None:
-                    events_by_character[participant_id].add(entity_id)
             for entry in _component_data(entity, "event_location_reference").get(
                 "location_refs", []
             ):
@@ -302,17 +290,13 @@ def rebuild_derived_indexes(
                     entry.get("location_ref") if isinstance(entry, dict) else None
                 )
                 if location_id is not None:
-                    events_by_location[location_id].add(entity_id)
-            for entry in _component_data(
+                    events_by_entity[location_id].add(entity_id)
+            for reference in _component_data(
                 entity, "event_related_entity_reference"
             ).get("related_entity_refs", []):
-                related_entity_id = _reference_id(
-                    entry.get("related_entity_ref")
-                    if isinstance(entry, dict)
-                    else None
-                )
+                related_entity_id = _reference_id(reference)
                 if related_entity_id is not None:
-                    events_by_related_entity[related_entity_id].add(entity_id)
+                    events_by_entity[related_entity_id].add(entity_id)
 
         elif entity_type == "character_relation":
             for participant_ref in _component_data(
@@ -393,7 +377,7 @@ def rebuild_derived_indexes(
                 relations_by_character.get(entity_id, set()),
                 "character_relation",
             )
-            _upsert_history_index(entity, events_by_character.get(entity_id, set()))
+            _upsert_history_index(entity, events_by_entity.get(entity_id, set()))
             _replace_index_component(
                 entity,
                 "inventory_index",
@@ -405,7 +389,7 @@ def rebuild_derived_indexes(
             )
 
         elif entity_type == "location":
-            _upsert_history_index(entity, events_by_location.get(entity_id, set()))
+            _upsert_history_index(entity, events_by_entity.get(entity_id, set()))
             _replace_simple_index(
                 entity,
                 "child_location_index",
@@ -424,9 +408,7 @@ def rebuild_derived_indexes(
             )
 
         elif entity_type == "item":
-            _upsert_history_index(
-                entity, events_by_related_entity.get(entity_id, set())
-            )
+            _upsert_history_index(entity, events_by_entity.get(entity_id, set()))
             _replace_simple_index(
                 entity,
                 "contents_index",
@@ -436,9 +418,7 @@ def rebuild_derived_indexes(
             )
 
         elif entity_type == "organization":
-            _upsert_history_index(
-                entity, events_by_related_entity.get(entity_id, set())
-            )
+            _upsert_history_index(entity, events_by_entity.get(entity_id, set()))
             _replace_simple_index(
                 entity,
                 "child_organization_index",
@@ -448,9 +428,7 @@ def rebuild_derived_indexes(
             )
 
         elif entity_type in {"skill", "concept"}:
-            _upsert_history_index(
-                entity, events_by_related_entity.get(entity_id, set())
-            )
+            _upsert_history_index(entity, events_by_entity.get(entity_id, set()))
 
         elif entity_type == "event":
             _replace_simple_index(
@@ -462,6 +440,7 @@ def rebuild_derived_indexes(
             )
 
         elif entity_type == "character_relation":
+            _upsert_history_index(entity, events_by_entity.get(entity_id, set()))
             entries = []
             for memory_id, aggregate in sorted(
                 relation_memory_links.get(entity_id, {}).items()
@@ -664,48 +643,6 @@ def _validate_memory_reference_ownership(
     return errors
 
 
-def _validate_witnessed_memory_participation(
-    entities: list[dict[str, Any]],
-    by_id: dict[str, dict[str, Any]],
-) -> list[dict[str, str]]:
-    """亲历型 Memory 的 Owner 必须出现在来源 Event 的参与者或观察者目录中。"""
-
-    errors: list[dict[str, str]] = []
-    for entity_index, memory in enumerate(entities):
-        if not isinstance(memory, dict) or memory.get("type") != "memory":
-            continue
-        source = _component_data(memory, "source_event_reference")
-        if source.get("acquisition_mode") != "witnessed_event":
-            continue
-        owner_id = _reference_id(
-            _component_data(memory, "memory_owner_reference").get("owner_ref")
-        )
-        if owner_id is None:
-            continue
-        for source_index, event_ref in enumerate(source.get("event_refs", [])):
-            event_id = _reference_id(event_ref)
-            event = by_id.get(event_id) if event_id is not None else None
-            if event is None or event.get("type") != "event":
-                continue
-            participant_ids = {
-                _reference_id(entry.get("participant_ref"))
-                for entry in _component_data(
-                    event, "event_participant_reference"
-                ).get("participant_refs", [])
-                if isinstance(entry, dict)
-            }
-            participant_ids.discard(None)
-            if owner_id not in participant_ids:
-                errors.append(
-                    _issue(
-                        "WITNESSED_MEMORY_OWNER_NOT_EVENT_PARTICIPANT",
-                        f"/entities/{entity_index}/components/source_event_reference/data/event_refs/{source_index}",
-                        "亲历型 Memory 的 Owner 必须作为参与者、观察者或接收者出现在来源 Event 中。",
-                    )
-                )
-    return errors
-
-
 def _validate_relation_memory_ownership(
     entities: list[dict[str, Any]],
     by_id: dict[str, dict[str, Any]],
@@ -756,37 +693,6 @@ def _validate_relation_memory_ownership(
     return errors
 
 
-def _validate_event_participant_uniqueness(
-    entities: list[dict[str, Any]],
-) -> list[dict[str, str]]:
-    """同一 Event 不得把同一 Character 拆成多个参与者条目。"""
-
-    errors: list[dict[str, str]] = []
-    for entity_index, event in enumerate(entities):
-        if not isinstance(event, dict) or event.get("type") != "event":
-            continue
-        seen: set[str] = set()
-        entries = _component_data(event, "event_participant_reference").get(
-            "participant_refs", []
-        )
-        for participant_index, entry in enumerate(entries):
-            participant_id = _reference_id(
-                entry.get("participant_ref") if isinstance(entry, dict) else None
-            )
-            if participant_id is None:
-                continue
-            if participant_id in seen:
-                errors.append(
-                    _issue(
-                        "DUPLICATE_EVENT_PARTICIPANT",
-                        f"/entities/{entity_index}/components/event_participant_reference/data/participant_refs/{participant_index}/participant_ref",
-                        "同一 Character 在 Event 参与者中只能出现一次；角色应合并。",
-                    )
-                )
-            seen.add(participant_id)
-    return errors
-
-
 def _validate_event_location_sequence_uniqueness(
     entities: list[dict[str, Any]],
 ) -> list[dict[str, str]]:
@@ -833,18 +739,16 @@ def _validate_event_related_entity_uniqueness(
         entries = _component_data(event, "event_related_entity_reference").get(
             "related_entity_refs", []
         )
-        for related_index, entry in enumerate(entries):
-            related_entity_id = _reference_id(
-                entry.get("related_entity_ref") if isinstance(entry, dict) else None
-            )
+        for related_index, reference in enumerate(entries):
+            related_entity_id = _reference_id(reference)
             if related_entity_id is None:
                 continue
             if related_entity_id in seen:
                 errors.append(
                     _issue(
                         "DUPLICATE_EVENT_RELATED_ENTITY",
-                        f"/entities/{entity_index}/components/event_related_entity_reference/data/related_entity_refs/{related_index}/related_entity_ref",
-                        "同一 Entity 在 Event 相关对象中只能出现一次；作用应合并。",
+                        f"/entities/{entity_index}/components/event_related_entity_reference/data/related_entity_refs/{related_index}",
+                        "同一 Entity 在 Event 相关对象中只能出现一次。",
                     )
                 )
             seen.add(related_entity_id)
@@ -1026,44 +930,9 @@ def _replace_index_component(
 
 
 def _upsert_history_index(entity: dict[str, Any], event_ids: set[str]) -> None:
-    """更新已实现 Reference 产生的近期 Event，保留其他检索角色。"""
+    """按权威 Event 引用重建最小历史目录，不持久化可计算分类。"""
 
-    components = entity.setdefault("components", {})
-    current_entries = _component_data(entity, "history_index").get("event_refs", [])
-    entries: list[dict[str, Any]] = []
-    seen_event_ids: set[str] = set()
-    for entry in current_entries:
-        if not isinstance(entry, dict):
-            continue
-        event_id = _reference_id(entry.get("event_ref"))
-        if event_id is None or event_id in seen_event_ids:
-            continue
-        roles = [
-            role
-            for role in entry.get("index_roles", [])
-            if isinstance(role, str) and (role != "recent" or event_id in event_ids)
-        ]
-        if event_id in event_ids and "recent" not in roles:
-            roles.append("recent")
-        if roles:
-            updated = copy.deepcopy(entry)
-            updated["index_roles"] = roles
-            entries.append(updated)
-            seen_event_ids.add(event_id)
-    for event_id in sorted(event_ids - seen_event_ids):
-        entries.append(
-            {
-                "event_ref": {"id": event_id, "type": "event"},
-                "index_roles": ["recent"],
-            }
-        )
-    if entries:
-        components["history_index"] = {
-            "schema_version": "0.1.0",
-            "data": {"event_refs": entries},
-        }
-    else:
-        components.pop("history_index", None)
+    _replace_simple_index(entity, "history_index", "event_refs", event_ids, "event")
 
 
 def _component_data(entity: dict[str, Any], component_name: str) -> dict[str, Any]:

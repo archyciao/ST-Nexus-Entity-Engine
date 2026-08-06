@@ -19,7 +19,7 @@
                 "type": "object",
                 "properties": {
                   "location_state_id": { "type": "string", "pattern": "^location_state_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
-                  "kind": { "enum": ["access", "environment", "structure", "hazard", "activity", "other"] },
+                  "kind": { "type": "string", "minLength": 1, "maxLength": 100 },
                   "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
                   "status": { "enum": ["active", "inactive"] }
                 },

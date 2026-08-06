@@ -120,6 +120,54 @@
       "migrations": []
     },
     {
+      "name": "entity_facts",
+      "namespace": "core",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:core:entity_facts:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "character",
+        "location",
+        "item",
+        "organization",
+        "skill",
+        "concept",
+        "character_relation"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "system", "resolver", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": []
+      },
+      "ai": {
+        "title_zh": "开放事实组件",
+        "description_zh": "保存不承担身份、引用、关系或控制职责的开放事实资料。",
+        "usage_notes": [
+          "事实字段按对象实际内容开放填写，不要求模型补齐固定模板。",
+          "正式名称、Entity 引用、关系端点、位置和系统状态不得藏在本组件中。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [],
+      "migrations": []
+    },
+    {
       "name": "current_location_reference",
       "namespace": "core",
       "category": "reference",
@@ -259,7 +307,6 @@
       "authority": "derived",
       "rebuildable": true,
       "rebuild_from": [
-        "event.event_participant_reference",
         "event.event_location_reference",
         "event.event_related_entity_reference",
         "event.state_change"
@@ -292,7 +339,7 @@
         "description_zh": "提供相关 Event 的可重建检索入口，不是历史权威来源。",
         "usage_notes": [
           "AI 可以读取索引候选，但最终判断必须加载权威 Event。",
-          "同一 Event 的 recent、important、aspect_started 等维度放在 index_roles 中，不拆成多组平行数组。"
+          "索引只保存 Event 引用；近期、重要性和转折等排序按 Event 自身数据与查询条件计算。"
         ]
       },
       "correction": {
@@ -301,18 +348,13 @@
             "object_path": "/data",
             "alias": "events",
             "canonical": "event_refs"
-          },
-          {
-            "object_path": "/data/event_refs/*",
-            "alias": "roles",
-            "canonical": "index_roles"
           }
         ],
         "value_aliases": []
       },
       "references": [
         {
-          "path": "/data/event_refs/*/event_ref",
+          "path": "/data/event_refs/*",
           "target_types": [
             "event"
           ],
@@ -1437,6 +1479,75 @@
       "migrations": []
     },
     {
+      "name": "event_content",
+      "namespace": "event",
+      "category": "data",
+      "current_version": "0.1.0",
+      "versions": [
+        {
+          "version": "0.1.0",
+          "schema_id": "urn:world-simulator:schema:component:event:event_content:0.1.0"
+        }
+      ],
+      "allowed_entity_types": [
+        "event"
+      ],
+      "authority": "authoritative",
+      "rebuildable": false,
+      "rebuild_from": [],
+      "allow_disable": false,
+      "unknown_field_policy": "reject",
+      "permissions": {
+        "default": {
+          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
+          "write_roles": ["projector", "system", "admin", "migration"]
+        },
+        "fields": [
+          {
+            "path": "/data/key_details/*/detail_id",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/key_details/*/actor_ref/id",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          },
+          {
+            "path": "/data/key_details/*/actor_ref/type",
+            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
+            "propose_roles": [],
+            "write_roles": ["system", "admin", "migration"]
+          }
+        ]
+      },
+      "ai": {
+        "title_zh": "Event 内容组件",
+        "description_zh": "保存 Event 状态、客观故事摘要和少量关键言语或动作。",
+        "usage_notes": [
+          "Description 保留在 Entity Core；本组件不保存 Title。",
+          "来源书签、后台原文、提示词和模型原回复属于维护或运行记录，不写入本组件。",
+          "关键特写允许逐字原话或忠实转述；fidelity 防止把转述误作引文。"
+        ]
+      },
+      "correction": {
+        "key_aliases": [],
+        "value_aliases": []
+      },
+      "references": [
+        {
+          "path": "/data/key_details/*/actor_ref",
+          "target_types": ["character"],
+          "cardinality": "many",
+          "authority_direction": "host_to_target"
+        }
+      ],
+      "migrations": []
+    },
+    {
       "name": "event_time",
       "namespace": "event",
       "category": "data",
@@ -1528,7 +1639,7 @@
         "title_zh": "Event 地点引用组件",
         "description_zh": "保存 Event 实际发生或实际经过的 Location 权威引用。",
         "usage_notes": [
-          "AI 只提出实际地点候选和语义角色，Resolver 匹配 Location，固定脚本写入稳定 ID 与顺序。",
+          "AI 只提出实际地点候选，Resolver 匹配 Location，固定脚本写入稳定 ID 与顺序。",
           "仅被提到、受邀或计划前往的地点不得进入本组件。",
           "移动 Event 返回原地点时允许同一 Location 以新的经过顺序再次出现。",
           "Location 的 HistoryIndex 是本组件的可重建反向目录。"
@@ -1542,62 +1653,6 @@
         {
           "path": "/data/location_refs/*/location_ref",
           "target_types": ["location"],
-          "cardinality": "many",
-          "authority_direction": "host_to_target"
-        }
-      ],
-      "migrations": []
-    },
-    {
-      "name": "event_participant_reference",
-      "namespace": "event",
-      "category": "reference",
-      "current_version": "0.1.0",
-      "versions": [
-        {
-          "version": "0.1.0",
-          "schema_id": "urn:world-simulator:schema:component:event:event_participant_reference:0.1.0"
-        }
-      ],
-      "allowed_entity_types": [
-        "event"
-      ],
-      "authority": "authoritative",
-      "rebuildable": false,
-      "rebuild_from": [],
-      "allow_disable": false,
-      "unknown_field_policy": "reject",
-      "permissions": {
-        "default": {
-          "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
-          "propose_roles": ["ai", "user", "resolver", "system", "admin"],
-          "write_roles": ["projector", "system", "admin", "migration"]
-        },
-        "fields": [
-          {
-            "path": "/data/participant_refs/*/participant_ref/type",
-            "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
-            "propose_roles": [],
-            "write_roles": ["system", "admin", "migration"]
-          }
-        ]
-      },
-      "ai": {
-        "title_zh": "Event 参与者引用组件",
-        "description_zh": "保存实际参与、观察或接收当前 Event 的 Character 权威引用。",
-        "usage_notes": [
-          "同一 Character 的全部参与角色集中在一项中。",
-          "Character 的 HistoryIndex 是本组件的可重建反向目录。"
-        ]
-      },
-      "correction": {
-        "key_aliases": [],
-        "value_aliases": []
-      },
-      "references": [
-        {
-          "path": "/data/participant_refs/*/participant_ref",
-          "target_types": ["character"],
           "cardinality": "many",
           "authority_direction": "host_to_target"
         }
@@ -1631,7 +1686,7 @@
         },
         "fields": [
           {
-            "path": "/data/related_entity_refs/*/related_entity_ref/type",
+            "path": "/data/related_entity_refs/*/type",
             "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"],
             "propose_roles": [],
             "write_roles": ["system", "admin", "migration"]
@@ -1640,10 +1695,11 @@
       },
       "ai": {
         "title_zh": "Event 相关对象引用组件",
-        "description_zh": "保存 Event 实际涉及的 Item、Organization、Skill 与 Concept 权威引用。",
+        "description_zh": "保存与 Event 事实有关的 World Entity 引用，不额外判断参与方式。",
         "usage_notes": [
-          "Character 与实际 Location 分别进入专用 Event 引用组件，不在本组件重复保存。",
-          "仅提及、计划使用或背景知识不得进入本组件。",
+          "Character、Location、Item、Organization、Skill、Concept 与 Character Relation 使用同一关联方式。",
+          "引用表示该 Event 中存在与目标有关的事实，不表示目标实际在场或参与。",
+          "实际发生地点另由 EventLocationReference 保存。",
           "目标 Entity 的 HistoryIndex 可由本组件反向重建。"
         ]
       },
@@ -1653,8 +1709,8 @@
       },
       "references": [
         {
-          "path": "/data/related_entity_refs/*/related_entity_ref",
-          "target_types": ["item", "organization", "skill", "concept"],
+            "path": "/data/related_entity_refs/*",
+            "target_types": ["character", "location", "item", "organization", "skill", "concept", "character_relation"],
           "cardinality": "many",
           "authority_direction": "host_to_target"
         }
@@ -2249,10 +2305,10 @@
       "versions": [{"version": "0.1.0", "schema_id": "urn:world-simulator:schema:component:core:related_concept_reference:0.1.0"}],
       "allowed_entity_types": ["location", "item", "organization", "skill", "concept"],
       "authority": "authoritative", "rebuildable": false, "rebuild_from": [], "allow_disable": false, "unknown_field_policy": "reject",
-      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/concept_refs/*/concept_ref/type", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
-      "ai": {"title_zh": "相关概念引用组件", "description_zh": "保存 World Entity 长期引用的 Concept 及宿主语境角色。", "usage_notes": ["只在概念长期适用于宿主时保存；一次 Event 中的临时涉及不自动建立长期引用。"]},
+      "permissions": {"default": {"read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": ["ai", "user", "resolver", "system", "admin"], "write_roles": ["projector", "system", "admin", "migration"]}, "fields": [{"path": "/data/concept_refs/*/type", "read_roles": ["ai", "user", "system", "resolver", "projector", "admin", "migration"], "propose_roles": [], "write_roles": ["system", "migration"]}]},
+      "ai": {"title_zh": "相关概念引用组件", "description_zh": "保存 World Entity 长期引用的 Concept。", "usage_notes": ["只在概念长期适用于宿主时保存；一次 Event 中的临时涉及不自动建立长期引用。", "具体含义写入开放事实，不再要求额外关系分类。"]},
       "correction": {"key_aliases": [], "value_aliases": []},
-      "references": [{"path": "/data/concept_refs/*/concept_ref", "target_types": ["concept"], "cardinality": "many", "authority_direction": "host_to_target"}],
+      "references": [{"path": "/data/concept_refs/*", "target_types": ["concept"], "cardinality": "many", "authority_direction": "host_to_target"}],
       "migrations": []
     },
     {

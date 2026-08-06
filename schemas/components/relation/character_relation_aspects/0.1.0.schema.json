@@ -30,7 +30,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100,
-                    "pattern": "^[a-z][a-z0-9_]*$",
                     "description": "可扩展的登记类别，例如 master_disciple 或 personal_distrust。"
                   },
                   "description": {
@@ -121,8 +120,7 @@
                           "items": {
                             "type": "string",
                             "minLength": 1,
-                            "maxLength": 100,
-                            "pattern": "^[a-z][a-z0-9_]*$"
+                            "maxLength": 100
                           },
                           "description": "该 Character 在当前关系面向中的角色。"
                         }

@@ -4,11 +4,8 @@
   "data": {
     "event_refs": [
       {
-        "event_ref": {
-          "id": "event_01K2ABCDEFGHJKMNPQRSTV000K",
-          "type": "event"
-        },
-        "index_roles": ["recent", "important"]
+        "id": "event_01K2ABCDEFGHJKMNPQRSTV000K",
+        "type": "event"
       }
     ]
   }

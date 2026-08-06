@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 import unittest
+from copy import deepcopy
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +35,7 @@ class ComponentSchemaTests(unittest.TestCase):
                 "examples/valid/current_location_reference.json",
             ),
             ("history_index", "examples/valid/history_index.json"),
+            ("event_content", "examples/valid/event_content.json"),
             ("event_time", "examples/valid/event_time.json"),
             (
                 "event_location_reference",
@@ -171,9 +173,11 @@ class ComponentSchemaTests(unittest.TestCase):
         self.assertFalse(report.valid)
         self.assertIn("DUPLICATE_ITEM_ID", {item["code"] for item in report.errors})
 
-    def test_index_roles_must_be_unique(self) -> None:
+    def test_history_event_refs_must_be_unique(self) -> None:
         instance = self.load("examples/valid/history_index.json")
-        instance["data"]["event_refs"][0]["index_roles"] = ["recent", "recent"]
+        instance["data"]["event_refs"].append(
+            deepcopy(instance["data"]["event_refs"][0])
+        )
         report = self.validator.validate("history_index", instance)
         self.assertFalse(report.valid)
         self.assertIn("INVALID_VALUE", {item["code"] for item in report.errors})
@@ -337,33 +341,16 @@ class ComponentSchemaTests(unittest.TestCase):
                     path=path,
                 )
                 self.assertEqual("PERMISSION_DENIED", denied["code"])
-        self.assertIsNone(
-            self.validator.check_permission(
-                "event_location_reference",
-                role="ai",
-                operation="propose",
-                path="/data/location_refs/0/location_roles",
-            )
-        )
-
     def test_event_related_entity_type_is_system_controlled(self) -> None:
-        """AI 可提出对象作用，但正式 Entity Type 由系统写入。"""
+        """普通关联由脚本写入，AI 不能直接指定正式 Entity Type。"""
 
         denied = self.validator.check_permission(
             "event_related_entity_reference",
             role="ai",
             operation="propose",
-            path="/data/related_entity_refs/0/related_entity_ref/type",
+            path="/data/related_entity_refs/0/type",
         )
         self.assertEqual("PERMISSION_DENIED", denied["code"])
-        self.assertIsNone(
-            self.validator.check_permission(
-                "event_related_entity_reference",
-                role="ai",
-                operation="propose",
-                path="/data/related_entity_refs/0/involvement_roles",
-            )
-        )
 
     def test_reference_id_prefix_must_match_reference_type(self) -> None:
         instance = self.load("examples/valid/current_location_reference.json")

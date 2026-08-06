@@ -58,11 +58,11 @@ class EntityNetworkTests(unittest.TestCase):
             other_character["components"]["memory_index"]["data"]["memory_refs"],
             [{"id": "memory_01K2ABCDEFGHJKMNPQRSTV000V", "type": "memory"}],
         )
-        for participant in (character, other_character):
+        for related_character in (character, other_character):
             self.assertEqual(
                 {
-                    entry["event_ref"]["id"]
-                    for entry in participant["components"]["history_index"]["data"][
+                    entry["id"]
+                    for entry in related_character["components"]["history_index"]["data"][
                         "event_refs"
                     ]
                 },
@@ -72,11 +72,8 @@ class EntityNetworkTests(unittest.TestCase):
             location["components"]["history_index"]["data"]["event_refs"],
             [
                 {
-                    "event_ref": {
-                        "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
-                        "type": "event",
-                    },
-                    "index_roles": ["recent"],
+                    "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                    "type": "event",
                 }
             ],
         )
@@ -194,7 +191,6 @@ class EntityNetworkTests(unittest.TestCase):
                     "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
                     "type": "location",
                 },
-                "location_roles": ["end"],
                 "sequence": 0,
             }
         )
@@ -218,7 +214,6 @@ class EntityNetworkTests(unittest.TestCase):
                     "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
                     "type": "location",
                 },
-                "location_roles": ["end"],
                 "sequence": 1,
             }
         )
@@ -229,7 +224,7 @@ class EntityNetworkTests(unittest.TestCase):
         self.assertTrue(report.valid, report.errors)
 
     def test_event_related_entity_cannot_be_listed_twice(self) -> None:
-        """同一相关对象的多种作用必须合并，不能制造重复引用。"""
+        """同一相关对象只保存一个直接引用。"""
 
         entities = copy.deepcopy(self.source_entities)
         item = json.loads(
@@ -244,14 +239,8 @@ class EntityNetworkTests(unittest.TestCase):
             "schema_version": "0.1.0",
             "data": {
                 "related_entity_refs": [
-                    {
-                        "related_entity_ref": copy.deepcopy(related_ref),
-                        "involvement_roles": ["used"],
-                    },
-                    {
-                        "related_entity_ref": copy.deepcopy(related_ref),
-                        "involvement_roles": ["damaged"],
-                    },
+                    copy.deepcopy(related_ref),
+                    copy.deepcopy(related_ref),
                 ]
             },
         }
@@ -262,25 +251,17 @@ class EntityNetworkTests(unittest.TestCase):
             {entry["code"] for entry in report.errors},
         )
 
-    def test_witnessed_memory_owner_must_be_an_event_participant(self) -> None:
-        """亲历者不能拥有来源 Event 的 Memory，却从该 Event 参与目录中消失。"""
+    def test_memory_owner_does_not_imply_event_participation(self) -> None:
+        """Owner 与来源 Event 已由 Memory 连接，不要求 Event 另存参与类别。"""
 
         entities = copy.deepcopy(self.source_entities)
         event = next(entity for entity in entities if entity["type"] == "event")
-        entries = event["components"]["event_participant_reference"]["data"][
-            "participant_refs"
-        ]
-        entries[:] = [
-            entry
-            for entry in entries
-            if entry["participant_ref"]["id"]
-            != "character_01K2ABCDEFGHJKMNPQRSTV0001"
-        ]
+        event["components"]["event_related_entity_reference"]["data"][
+            "related_entity_refs"
+        ] = []
+        event["components"].pop("event_related_entity_reference")
         report = self.validator.validate(rebuild_derived_indexes(entities))
-        self.assertIn(
-            "WITNESSED_MEMORY_OWNER_NOT_EVENT_PARTICIPANT",
-            {item["code"] for item in report.errors},
-        )
+        self.assertTrue(report.valid, report.errors)
 
 
 if __name__ == "__main__":

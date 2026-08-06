@@ -13,7 +13,7 @@
         "data": {
           "type": "object",
           "properties": {
-            "organization_kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+            "organization_kind": { "type": "string", "minLength": 1, "maxLength": 120 },
             "public_role": { "type": "string", "minLength": 1, "maxLength": 1000 },
             "operating_scope": { "type": "string", "minLength": 1, "maxLength": 1200 },
             "continuity_basis": { "type": "string", "minLength": 1, "maxLength": 1200 }

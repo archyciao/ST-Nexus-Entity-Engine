@@ -214,10 +214,10 @@ class EntityExtractionPlanningTests(unittest.TestCase):
             ],
         )
 
-        self.assertEqual(["location"], [job.entity_type for job in jobs])
-        self.assertEqual(2, len(jobs[0].payload["candidates"]))
+        self.assertEqual(["all"], [job.entity_type for job in jobs])
+        self.assertEqual(3, len(jobs[0].payload["candidates"]))
         self.assertEqual(
-            {"r1", "r2", "r5"},
+            {"r1", "r2", "r3"},
             {item["ref"] for item in jobs[0].payload["source_messages"]},
         )
 

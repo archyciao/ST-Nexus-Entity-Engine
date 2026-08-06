@@ -59,6 +59,7 @@ class EntityIDTests(unittest.TestCase):
             "stage_numeric_binding",
             "concept_stage",
             "concept_stage_context",
+            "event_detail",
         ):
             with self.subTest(kind=kind):
                 local_id = new_local_id(kind)
