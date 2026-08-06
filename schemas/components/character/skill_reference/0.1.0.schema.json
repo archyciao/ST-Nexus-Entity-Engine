@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:skill_reference:0.1.0",
+  "title": "SkillReferenceComponent 0.1.0",
+  "description": "保存 Character 已掌握 Skill 的引用及当前语义熟练度。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "skill_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "skill_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "skill" }
+                        }
+                      }
+                    ]
+                  },
+                  "proficiency_description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "该 Character 对 Skill 的当前掌握方式和实际水平；不复制 Skill 定义。"
+                  }
+                },
+                "required": ["skill_ref", "proficiency_description"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["skill_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -1,0 +1,25 @@
+// 一、文件级总览
+// 文件功能：说明 Location、Item、Organization、Skill 或 Concept 的正式 Component 实例。
+// 架构位置：这些 Component 保存宿主自身权威语义；Reference 连接目标，Index 只做反向查询。
+// 输入：由提取候选经过匹配、权限和来源校验后形成的数据。
+// 输出：可由对应版本 Schema 校验的 Component 实例。
+// 不负责：不生成 Entity ID，不保存目标 Entity 正文，也不让 AI 直接维护反向 Index。
+
+{
+  // 二、结构级说明
+  // 每个 Component 都使用统一外壳；正式名称和版本由 Registry 选择。
+  "schema_version": "0.1.0",
+  "data": {
+    // 三、字段级说明
+    // 稳定定义字段说明“它是什么”，当前变化应放入带局部 ID 的 State 条目。
+    "stable_definition": "某项可以长期复用的自然语言定义。",
+
+    // 局部条目的 key 只出现在 AI 候选；正式保存时由系统换成 kind_ULID。
+    "semantic_entries": [
+      {
+        "entry_id": "由系统生成的局部 ID",
+        "description": "可独立更新、结束、引用和审计的语义条目。"
+      }
+    ]
+  }
+}

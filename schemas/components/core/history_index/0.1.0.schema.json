@@ -17,33 +17,19 @@
           "properties": {
             "event_refs": {
               "type": "array",
+              "uniqueItems": true,
               "items": {
-                "type": "object",
-                "properties": {
-                  "event_ref": {
-                    "allOf": [
-                      {
-                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
-                      },
-                      {
-                        "type": "object",
-                        "properties": {
-                          "type": { "const": "event" }
-                        }
-                      }
-                    ]
+                "allOf": [
+                  {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
                   },
-                  "index_roles": {
-                    "type": "array",
-                    "items": {
-                      "enum": ["recent", "important"]
-                    },
-                    "minItems": 1,
-                    "uniqueItems": true
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": { "const": "event" }
+                    }
                   }
-                },
-                "required": ["event_ref", "index_roles"],
-                "additionalProperties": false
+                ]
               }
             }
           },

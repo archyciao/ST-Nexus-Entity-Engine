@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:item:current_placement_reference:0.1.0",
+  "title": "CurrentPlacementReferenceComponent 0.1.0",
+  "description": "保存 Item 当前直接位于 Character、Item 或 Location 的唯一物理权威。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "placement_ref": {
+              "allOf": [
+                { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                { "type": "object", "properties": { "type": { "enum": ["character", "item", "location"] } } }
+              ]
+            },
+            "placement_role": { "enum": ["carried", "equipped", "worn", "contained", "placed", "stored"] },
+            "placement_detail": { "type": "string", "minLength": 1, "maxLength": 600 }
+          },
+          "required": ["placement_ref", "placement_role"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         "--root",
         type=Path,
         default=_default_root(),
-        help="World_Simulator_Frame 项目根目录。",
+        help="NexusEntityEngine 项目根目录。",
     )
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("check-registry", help="检查 Registry 与 Schema 一致性。")

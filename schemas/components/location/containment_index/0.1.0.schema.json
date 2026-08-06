@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:location:containment_index:0.1.0",
+  "title": "ContainmentIndexComponent 0.1.0",
+  "description": "从 Character 位置与 Item 放置引用重建 Location 的直接内容目录。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "entity_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "entity_ref": { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                  "containment_role": { "enum": ["present", "placed", "stored"] }
+                },
+                "required": ["entity_ref", "containment_role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["entity_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

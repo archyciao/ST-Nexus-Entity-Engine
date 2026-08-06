@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:organization:organization_state:0.1.0",
+  "title": "OrganizationStateComponent 0.1.0",
+  "description": "保存 Organization 当前仍有效且可独立定位的语义状态。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "states": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "organization_state_id": { "type": "string", "pattern": "^organization_state_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "kind": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "status": { "enum": ["active", "inactive"] }
+                },
+                "required": ["organization_state_id", "kind", "description", "status"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["states"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

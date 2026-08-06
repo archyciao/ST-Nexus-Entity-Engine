@@ -246,6 +246,34 @@ class SchemaStore:
                         )
                     )
 
+        for index, rule in enumerate(component.get("item_identity_rules", [])):
+            array_path = rule.get("array_path")
+            item_schema = (
+                schema_at_instance_path(
+                    schema,
+                    f"{array_path}/*",
+                    self.schema_by_id,
+                )
+                if isinstance(array_path, str)
+                else None
+            )
+            properties = (
+                item_schema.get("properties", {})
+                if isinstance(item_schema, dict)
+                else {}
+            )
+            id_field = rule.get("id_field")
+            if id_field not in properties:
+                issues.append(
+                    RegistryIssue(
+                        "REGISTRY_ITEM_ID_PATH_MISSING",
+                        f"{base}/item_identity_rules/{index}",
+                        (
+                            "数组条目标识不存在于当前 Schema: "
+                            f"{array_path}/*/{id_field}"
+                        ),
+                    )
+                )
         seen_key_aliases: dict[tuple[str, str], str] = {}
         for index, alias in enumerate(
             component.get("correction", {}).get("key_aliases", [])

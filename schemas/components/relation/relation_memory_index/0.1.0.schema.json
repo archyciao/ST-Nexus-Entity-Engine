@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:relation:relation_memory_index:0.1.0",
+  "title": "RelationMemoryIndexComponent 0.1.0",
+  "description": "反向索引帮助理解 Relation 及其 Aspect 的重要 Memory。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "memory_refs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "memory_ref": {
+                    "allOf": [
+                      {
+                        "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": { "const": "memory" }
+                        }
+                      }
+                    ]
+                  },
+                  "related_aspect_ids": {
+                    "type": "array",
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "items": {
+                      "type": "string",
+                      "pattern": "^relation_aspect_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+                    },
+                    "description": "该 Memory 关联的关系面向；整体关系 Memory 可为空。"
+                  },
+                  "index_roles": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "uniqueItems": true,
+                    "items": {
+                      "enum": [
+                        "formation_basis",
+                        "turning_point",
+                        "current_basis",
+                        "important"
+                      ]
+                    },
+                    "description": "该 Memory 在关系理解中的索引用途。"
+                  }
+                },
+                "required": [
+                  "memory_ref",
+                  "related_aspect_ids",
+                  "index_roles"
+                ],
+                "additionalProperties": false
+              },
+              "description": "从 Memory 的 RelationContextReference 重建。"
+            }
+          },
+          "required": ["memory_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

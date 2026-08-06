@@ -1,0 +1,169 @@
+{
+  "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+  "type": "character_relation",
+  "description": "令狐冲与岳不群之间长期存在师徒关系；令狐冲仍敬重师父但逐渐警惕，岳不群则因剑法来历对令狐冲产生未公开的猜疑。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-07-30T10:00:00+08:00",
+        "updated_at": "2026-07-30T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "relation_endpoint_reference": {
+      "schema_version": "0.1.0",
+      "data": {
+        "participant_refs": [
+          {
+            "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+            "type": "character"
+          },
+          {
+            "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+            "type": "character"
+          }
+        ]
+      }
+    },
+    "character_relation_aspects": {
+      "schema_version": "0.1.0",
+      "data": {
+        "aspects": [
+          {
+            "aspect_id": "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0201",
+            "kind": "master_disciple",
+            "description": "岳不群是令狐冲的授业师父，令狐冲是岳不群收入门下并长期教养的大弟子。",
+            "status": "active",
+            "perspective": {
+              "mode": "shared_fact"
+            },
+            "participant_roles": [
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                },
+                "roles": ["disciple"]
+              },
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                },
+                "roles": ["master"]
+              }
+            ],
+            "disclosure": {
+              "visibility": "public",
+              "concealed_from_refs": []
+            }
+          },
+          {
+            "aspect_id": "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0202",
+            "kind": "personal_distrust",
+            "description": "岳不群怀疑令狐冲隐瞒剑法来历，并开始通过试探与观察判断其是否失去控制。",
+            "status": "active",
+            "perspective": {
+              "mode": "character_view",
+              "owner_ref": {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                "type": "character"
+              }
+            },
+            "participant_roles": [
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                },
+                "roles": ["suspected_person"]
+              },
+              {
+                "character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                },
+                "roles": ["distrustful_observer"]
+              }
+            ],
+            "disclosure": {
+              "visibility": "secret",
+              "concealed_from_refs": [
+                {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "character_relation_state": {
+      "schema_version": "0.1.0",
+      "data": {
+        "directional_states": [
+          {
+            "from_character_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+              "type": "character"
+            },
+            "toward_character_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+              "type": "character"
+            },
+            "summary": "仍把岳不群视作授业恩师并希望获得认可，但已察觉反复试探，因而有所保留。",
+            "tags": ["respectful", "guarded"]
+          },
+          {
+            "from_character_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+              "type": "character"
+            },
+            "toward_character_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+              "type": "character"
+            },
+            "summary": "认可令狐冲的天赋和过往师徒情分，但担心其剑法与声望脱离掌控，当前以试探和约束为主。",
+            "tags": ["distrustful", "controlling"]
+          }
+        ]
+      }
+    },
+    "relation_memory_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "memory_refs": [
+          {
+            "memory_ref": {
+              "id": "memory_01K2ABCDEFGHJKMNPQRSTV000V",
+              "type": "memory"
+            },
+            "related_aspect_ids": [
+              "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0202"
+            ],
+            "index_roles": ["formation_basis", "current_basis"]
+          }
+        ]
+      }
+    },
+    "history_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "event_refs": [
+          {
+            "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+            "type": "event"
+          },
+          {
+            "id": "event_01K2ABCDEFGHJKMNPQRSTV0012",
+            "type": "event"
+          }
+        ]
+      }
+    }
+  }
+}

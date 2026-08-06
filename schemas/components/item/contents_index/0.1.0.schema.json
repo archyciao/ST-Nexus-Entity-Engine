@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:item:contents_index:0.1.0",
+  "title": "ContentsIndexComponent 0.1.0",
+  "description": "从其他 Item 的 CurrentPlacementReference 重建当前容器的直接内容物目录。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "item_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                  { "type": "object", "properties": { "type": { "const": "item" } } }
+                ]
+              }
+            }
+          },
+          "required": ["item_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

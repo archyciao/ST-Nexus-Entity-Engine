@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:skill:skill_characteristic:0.1.0",
+  "title": "SkillCharacteristicComponent 0.1.0",
+  "description": "保存 Skill 的稳定表现风格、感官特征与差异锚点。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "style_summary": { "type": "string", "minLength": 1, "maxLength": 1200 },
+            "sensory_signatures": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true },
+            "tactical_tendencies": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 600 }, "uniqueItems": true },
+            "distinguishing_features": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 600 }, "uniqueItems": true }
+          },
+          "required": ["style_summary", "sensory_signatures", "tactical_tendencies", "distinguishing_features"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

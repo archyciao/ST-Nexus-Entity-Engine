@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:relation:relation_endpoint_reference:0.1.0",
+  "title": "RelationEndpointReferenceComponent 0.1.0",
+  "description": "保存 Character Relation 唯一连接的两个 Character；角色语义属于具体关系面向。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "participant_refs": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 2,
+              "uniqueItems": true,
+              "items": {
+                "allOf": [
+                  {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "type": { "const": "character" }
+                    }
+                  }
+                ]
+              },
+              "description": "按 Character ID 升序保存的两个不同参与者引用。"
+            }
+          },
+          "required": ["participant_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

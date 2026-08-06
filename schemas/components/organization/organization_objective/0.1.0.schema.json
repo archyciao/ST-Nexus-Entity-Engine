@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:organization:organization_objective:0.1.0",
+  "title": "OrganizationObjectiveComponent 0.1.0",
+  "description": "保存 Organization 的若干中短期目标，不保存步骤、进度或 Process。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "objectives": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "objective_id": { "type": "string", "pattern": "^objective_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "horizon": { "enum": ["short_term", "medium_term"] },
+                  "related_entity_refs": { "type": "array", "items": { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" } }
+                },
+                "required": ["objective_id", "description", "horizon"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["objectives"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

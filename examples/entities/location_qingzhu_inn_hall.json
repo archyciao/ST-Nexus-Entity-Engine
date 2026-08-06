@@ -1,0 +1,58 @@
+{
+  "id": "location_01K2ABCDEFGHJKMNPQRSTV0301",
+  "type": "location",
+  "description": "青竹客栈大堂是客栈首层用于接待、饮食和公开交谈的主要空间，以临街柜台、通往二楼的木梯和嘈杂酒客为显著特征。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-08-05T10:00:00+08:00",
+        "updated_at": "2026-08-05T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {"primary_name": "青竹客栈大堂", "aliases": ["客栈大堂"]}
+    },
+    "location_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "location_kind": "inn_hall",
+        "primary_functions": ["接待住客", "供应饮食", "公开交谈"],
+        "scale_description": "可同时容纳数十名酒客活动。",
+        "spatial_characteristics": ["临街柜台位于入口一侧", "木梯连接二楼客房区"]
+      }
+    },
+    "environment_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "fixed_facilities": ["柜台", "木梯", "桌椅"],
+        "persistent_conditions": ["大堂与二楼之间容易传递脚步声"]
+      }
+    },
+    "location_atmosphere": {
+      "schema_version": "0.1.0",
+      "data": {
+        "atmosphere_summary": "平日热闹而市井，入夜后灯火昏黄。",
+        "sensory_features": ["酒菜气味浓重", "木楼板容易发出轻响"],
+        "cultural_impressions": ["是过路江湖人交换消息的公共场所"]
+      }
+    },
+    "location_state": {
+      "schema_version": "0.1.0",
+      "data": {
+        "states": [
+          {
+            "location_state_id": "location_state_01K2ABCDEFGHJKMNPQRSTV0302",
+            "kind": "activity",
+            "description": "夜间仍在营业，但命案传闻使酒客交谈明显谨慎。",
+            "status": "active"
+          }
+        ]
+      }
+    }
+  }
+}

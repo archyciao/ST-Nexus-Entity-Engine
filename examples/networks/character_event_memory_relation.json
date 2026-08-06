@@ -1,0 +1,462 @@
+{
+  "fixture_purpose": "验证 Character、Location、Event、Memory 与 Character Relation 的权威引用、Event 时间和可重建反向索引；不代表 Event 或 Memory 正文 Schema 已冻结。",
+  "entities": [
+    {
+      "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+      "type": "character",
+      "description": "剑客沈砚，重诺而谨慎；亲历山门冲突后，把同伴顾青视为可以托付后背之人。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T10:00:00+08:00",
+            "updated_at": "2026-08-02T10:00:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "identity": {
+          "schema_version": "0.1.0",
+          "data": {
+            "primary_name": "沈砚",
+            "aliases": []
+          }
+        },
+        "character_profile": {
+          "schema_version": "0.1.0",
+          "data": {
+            "species": "人类",
+            "background": "游历江湖的年轻剑客。"
+          }
+        },
+        "character_behavior_profile": {
+          "schema_version": "0.1.0",
+          "data": {
+            "personality": {
+              "summary": "重诺谨慎，在同伴遇险时会主动承担风险。"
+            },
+            "motivations": [],
+            "preferences": []
+          }
+        },
+        "character_state": {
+          "schema_version": "0.1.0",
+          "data": {
+            "physical_condition": "左臂有轻微擦伤，不影响行动。",
+            "mental_condition": "意识清醒，对山门周围仍保持警惕。",
+            "current_emotions": ["警惕", "安心"]
+          }
+        },
+        "memory_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "memory_refs": [
+              {
+                "memory_ref": {
+                  "id": "memory_01K2ABCDEFGHJKMNPQRSTV000S",
+                  "type": "memory"
+                },
+                "reference_roles": ["pinned", "active_context"]
+              }
+            ]
+          }
+        },
+        "history_index": {
+          "schema_version": "0.1.0",
+          "data": {
+            "event_refs": [
+              {
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+      "type": "character",
+      "description": "刀客顾青，行事果断；在山门冲突中替沈砚挡下暗箭，确认双方可以互相信任。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T10:00:00+08:00",
+            "updated_at": "2026-08-02T10:00:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "identity": {
+          "schema_version": "0.1.0",
+          "data": {
+            "primary_name": "顾青",
+            "aliases": []
+          }
+        },
+        "character_profile": {
+          "schema_version": "0.1.0",
+          "data": {
+            "species": "人类",
+            "background": "常年独行的江湖刀客。"
+          }
+        },
+        "character_behavior_profile": {
+          "schema_version": "0.1.0",
+          "data": {
+            "personality": {
+              "summary": "果断直接，更相信共同经历而不是口头承诺。"
+            },
+            "motivations": [],
+            "preferences": []
+          }
+        },
+        "character_state": {
+          "schema_version": "0.1.0",
+          "data": {
+            "physical_condition": "体力略有消耗，右手仍可稳定持刀。",
+            "mental_condition": "意识清醒，已经解除对沈砚的主要戒备。",
+            "current_emotions": ["疲惫", "信任"]
+          }
+        },
+        "memory_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "memory_refs": [
+              {
+                "memory_ref": {
+                  "id": "memory_01K2ABCDEFGHJKMNPQRSTV000V",
+                  "type": "memory"
+                },
+                "reference_roles": ["pinned"]
+              }
+            ]
+          }
+        },
+        "history_index": {
+          "schema_version": "0.1.0",
+          "data": {
+            "event_refs": [
+              {
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
+      "type": "location",
+      "description": "青崖山门位于山道尽头，是出入青崖派驻地的石砌关口。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T09:55:00+08:00",
+            "updated_at": "2026-08-02T09:55:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "identity": {
+          "schema_version": "0.1.0",
+          "data": {
+            "primary_name": "青崖山门",
+            "aliases": []
+          }
+        }
+      }
+    },
+    {
+      "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+      "type": "event",
+      "description": "沈砚与顾青在青崖山门合力击退伏击者，并因互相救援建立信任。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T10:05:00+08:00",
+            "updated_at": "2026-08-02T10:05:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "event_content": {
+          "schema_version": "0.1.0",
+          "data": {
+            "status": "finalized",
+            "story_summary": "沈砚与顾青在青崖山门遭到伏击。两人协力迎敌，顾青替沈砚挡下暗箭，沈砚随即掩护顾青反击，最终击退袭击者。这次共同承担风险使二人的临时同行转为明确的互相信任。",
+            "key_details": [
+              {
+                "detail_id": "event_detail_01K2ABCDEFGHJKMNPQRSTV0108",
+                "kind": "action",
+                "content": "顾青抢上一步替沈砚挡下暗箭。",
+                "fidelity": "paraphrase",
+                "actor_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                }
+              }
+            ]
+          }
+        },
+        "event_time": {
+          "schema_version": "0.1.0",
+          "data": {
+            "start_time": {
+              "expression": "暮色初起时",
+              "precision": "approximate"
+            },
+            "end_time": {
+              "expression": "入夜不久",
+              "precision": "approximate"
+            }
+          }
+        },
+        "event_location_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "location_refs": [
+              {
+                "location_ref": {
+                  "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
+                  "type": "location"
+                },
+                "sequence": 0
+              }
+            ]
+          }
+        },
+        "event_related_entity_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "related_entity_refs": [
+              {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                "type": "character"
+              },
+              {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                "type": "character"
+              },
+              {
+                "id": "location_01K2ABCDEFGHJKMNPQRSTV0008",
+                "type": "location"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "memory_01K2ABCDEFGHJKMNPQRSTV000S",
+      "type": "memory",
+      "description": "沈砚记得顾青在暗箭袭来时没有退开，因而认定对方值得托付后背。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T10:06:00+08:00",
+            "updated_at": "2026-08-02T10:06:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "memory_owner_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "owner_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+              "type": "character"
+            }
+          }
+        },
+        "source_event_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "event_refs": [
+              {
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
+              }
+            ],
+            "acquisition_mode": "witnessed_event"
+          }
+        }
+      }
+    },
+    {
+      "id": "memory_01K2ABCDEFGHJKMNPQRSTV000V",
+      "type": "memory",
+      "description": "顾青记得沈砚在伏击中守住了两人的退路，并把这次并肩迎敌视为双方信任的依据。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T10:06:00+08:00",
+            "updated_at": "2026-08-02T10:06:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "memory_owner_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "owner_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+              "type": "character"
+            }
+          }
+        },
+        "source_event_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "event_refs": [
+              {
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
+              }
+            ],
+            "acquisition_mode": "witnessed_event"
+          }
+        },
+        "relation_context_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "relation_links": [
+              {
+                "relation_ref": {
+                  "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+                  "type": "character_relation"
+                },
+                "related_aspect_ids": [
+                  "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0201"
+                ],
+                "context_roles": ["important"]
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+      "type": "character_relation",
+      "description": "沈砚与顾青因山门伏击中的并肩行动建立了相互信任的同行关系。",
+      "components": {
+        "entity_management": {
+          "schema_version": "0.2.0",
+          "data": {
+            "created_at": "2026-08-02T10:07:00+08:00",
+            "updated_at": "2026-08-02T10:07:00+08:00",
+            "data_source": "system_generated",
+            "revision": 1,
+            "lifecycle_status": "active"
+          }
+        },
+        "relation_endpoint_reference": {
+          "schema_version": "0.1.0",
+          "data": {
+            "participant_refs": [
+              {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                "type": "character"
+              },
+              {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                "type": "character"
+              }
+            ]
+          }
+        },
+        "character_relation_aspects": {
+          "schema_version": "0.1.0",
+          "data": {
+            "aspects": [
+              {
+                "aspect_id": "relation_aspect_01K2ABCDEFGHJKMNPQRSTV0201",
+                "kind": "trusted_companions",
+                "description": "双方因共同承担山门伏击的风险而确认彼此值得信任。",
+                "status": "active",
+                "perspective": {
+                  "mode": "shared_fact"
+                },
+                "participant_roles": [
+                  {
+                    "character_ref": {
+                      "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                      "type": "character"
+                    },
+                    "roles": ["companion"]
+                  },
+                  {
+                    "character_ref": {
+                      "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                      "type": "character"
+                    },
+                    "roles": ["companion"]
+                  }
+                ],
+                "disclosure": {
+                  "visibility": "private",
+                  "concealed_from_refs": []
+                }
+              }
+            ]
+          }
+        },
+        "character_relation_state": {
+          "schema_version": "0.1.0",
+          "data": {
+            "directional_states": [
+              {
+                "from_character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                },
+                "toward_character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                },
+                "summary": "愿意把顾青视为可以共同应敌的可靠同伴。",
+                "tags": ["trusting"]
+              },
+              {
+                "from_character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                  "type": "character"
+                },
+                "toward_character_ref": {
+                  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+                  "type": "character"
+                },
+                "summary": "认可沈砚在危急时守住退路的判断和担当。",
+                "tags": ["trusting"]
+              }
+            ]
+          }
+        },
+        "history_index": {
+          "schema_version": "0.1.0",
+          "data": {
+            "event_refs": [
+              {
+                "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+                "type": "event"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:character_objective:0.1.0",
+  "title": "CharacterObjectiveComponent 0.1.0",
+  "description": "保存 Character 当前若干中短期目标，不保存计划步骤、执行进度或临时 Intent。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "objectives": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "objective_id": {
+                    "type": "string",
+                    "pattern": "^objective_[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+                    "description": "系统生成的 Objective 局部稳定标识，供更新、完成记录和未来 Process 引用使用。"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "中短期目标，只说明要达成什么。"
+                  },
+                  "horizon": {
+                    "enum": ["short_term", "medium_term"],
+                    "description": "目标预期作用的时间尺度。"
+                  },
+                  "related_entity_refs": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0"
+                    },
+                    "maxItems": 16,
+                    "uniqueItems": true,
+                    "description": "目标明确涉及的 Entity 引用；引用预览在读取时生成。"
+                  }
+                },
+                "required": ["objective_id", "description", "horizon"],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 24,
+              "description": "当前并列存在的中短期目标；每项目标未来可以被一个或多个独立 Process Entity 引用。"
+            }
+          },
+          "required": ["objectives"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

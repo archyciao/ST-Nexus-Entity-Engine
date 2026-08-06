@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:organization:organization_culture:0.1.0",
+  "title": "OrganizationCultureComponent 0.1.0",
+  "description": "保存 Organization 长期形成的价值、规范、禁忌与行事风格。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "summary": { "type": "string", "minLength": 1, "maxLength": 1500 },
+            "core_values": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true },
+            "norms": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true },
+            "taboos": { "type": "array", "items": { "type": "string", "minLength": 1, "maxLength": 500 }, "uniqueItems": true },
+            "behavioral_style": { "type": "string", "minLength": 1, "maxLength": 1200 }
+          },
+          "required": ["summary", "core_values", "norms", "taboos", "behavioral_style"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

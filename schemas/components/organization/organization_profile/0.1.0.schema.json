@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:organization:organization_profile:0.1.0",
+  "title": "OrganizationProfileComponent 0.1.0",
+  "description": "保存 Organization 的持续身份、社会定位和活动范围。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "organization_kind": { "type": "string", "minLength": 1, "maxLength": 120 },
+            "public_role": { "type": "string", "minLength": 1, "maxLength": 1000 },
+            "operating_scope": { "type": "string", "minLength": 1, "maxLength": 1200 },
+            "continuity_basis": { "type": "string", "minLength": 1, "maxLength": 1200 }
+          },
+          "required": ["organization_kind", "public_role", "operating_scope", "continuity_basis"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

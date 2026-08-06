@@ -1,0 +1,88 @@
+{
+  "id": "skill_01K2ABCDEFGHJKMNPQRSTV0601",
+  "type": "skill",
+  "description": "独孤九剑是一套以观察对手变化、寻找破绽并后发制人的高深剑术，重视临敌应变和因敌制胜，而不依赖固定招式套路。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-08-05T10:00:00+08:00",
+        "updated_at": "2026-08-05T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {"primary_name": "独孤九剑", "aliases": []}
+    },
+    "skill_definition": {
+      "schema_version": "0.1.0",
+      "data": {
+        "skill_kind": "sword_art",
+        "domain": "临敌观察、破招与剑术反击。",
+        "primary_capabilities": ["识别招式破绽", "依据对手变化选择反击路径"],
+        "form_description": "由多类破招原则组成，强调理解与临场应用而非机械复现套路。"
+      }
+    },
+    "skill_mechanics": {
+      "schema_version": "0.1.0",
+      "data": {
+        "mechanics": [
+          {
+            "skill_mechanic_id": "skill_mechanic_01K2ABCDEFGHJKMNPQRSTV0602",
+            "kind": "perception",
+            "description": "观察对手招式变化和力量衔接，判断可被利用的破绽。"
+          }
+        ]
+      }
+    },
+    "skill_characteristic": {
+      "schema_version": "0.1.0",
+      "data": {
+        "style_summary": "后发制人、因敌而变，不拘泥固定剑招。",
+        "sensory_signatures": ["剑路看似简洁，却总抢在对手变化的空隙"],
+        "tactical_tendencies": ["先观察再直取破绽"],
+        "distinguishing_features": ["重剑理和变化，不以招式繁复取胜"]
+      }
+    },
+    "skill_requirement": {
+      "schema_version": "0.1.0",
+      "data": {
+        "requirements": [
+          {
+            "skill_requirement_id": "skill_requirement_01K2ABCDEFGHJKMNPQRSTV0603",
+            "kind": "understanding",
+            "description": "需要理解招式变化并能在临敌时迅速判断。",
+            "requirement_role": "required"
+          }
+        ]
+      }
+    },
+    "skill_progression": {
+      "schema_version": "0.1.0",
+      "data": {
+        "progression_summary": "按是否能理解剑理并在实战中灵活应用区分阶段。",
+        "ordered": true,
+        "stage_evaluation": {"mode": "semantic", "numeric_bindings": []},
+        "stages": [
+          {
+            "skill_stage_id": "skill_stage_01K2ABCDEFGHJKMNPQRSTV0604",
+            "name": "初识剑理",
+            "order": 0,
+            "description": "已经理解基础破招思想，但临敌应用仍需刻意思考。",
+            "numeric_guidance": [],
+            "context_blocks": [
+              {
+                "stage_context_id": "skill_stage_context_01K2ABCDEFGHJKMNPQRSTV0605",
+                "purpose": "skill_use",
+                "content": "可以寻找明显破绽，但面对快速变化时仍可能迟疑。"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

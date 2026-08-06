@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:core:related_concept_reference:0.1.0",
+  "title": "RelatedConceptReferenceComponent 0.1.0",
+  "description": "保存 World Entity 与 Concept 之间的直接长期语义引用；目标定义仍以 Concept 为准。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "concept_refs": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "allOf": [
+                  { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                  { "type": "object", "properties": { "type": { "const": "concept" } } }
+                ]
+              }
+            }
+          },
+          "required": ["concept_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

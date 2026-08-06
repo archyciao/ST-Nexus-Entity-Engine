@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:core:entity-id:0.1.0",
+  "title": "EntityID",
+  "description": "系统生成的 type_series Entity ID；series 为 26 位 ULID，不包含姓名、化名或身份语义。",
+  "type": "string",
+  "maxLength": 128,
+  "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*_[0-7][0-9A-HJKMNP-TV-Z]{25}$"
+}

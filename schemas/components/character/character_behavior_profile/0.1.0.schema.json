@@ -1,0 +1,121 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:character_behavior_profile:0.1.0",
+  "title": "CharacterBehaviorProfileComponent 0.1.0",
+  "description": "统一保存 Character 的 Personality、若干 Motivation 与 Preference，作为长期行为和描写锚点。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "personality": {
+              "type": "object",
+              "properties": {
+                "summary": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 2000,
+                  "description": "对角色长期性格和为人处世方式的连贯概括。"
+                },
+                "traits": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "maxItems": 24,
+                  "uniqueItems": true,
+                  "description": "便于检索和组合的稳定人格特质。"
+                },
+                "behavioral_tendencies": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 500
+                  },
+                  "maxItems": 24,
+                  "uniqueItems": true,
+                  "description": "角色面对典型处境时长期倾向采用的处世方式。"
+                }
+              },
+              "required": ["summary"],
+              "additionalProperties": false
+            },
+            "motivations": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "motivation_id": {
+                    "type": "string",
+                    "pattern": "^motivation_[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+                    "description": "系统生成的 Motivation 局部稳定标识，供未来量化或目标关联使用。"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "长期推动角色行动的责任、欲望、执念或原则。"
+                  }
+                },
+                "required": ["motivation_id", "description"],
+                "additionalProperties": false
+              },
+              "maxItems": 32,
+              "description": "可以包含若干条彼此独立的长期行动支点。"
+            },
+            "preferences": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "preference_id": {
+                    "type": "string",
+                    "pattern": "^preference_[0-7][0-9A-HJKMNP-TV-Z]{25}$",
+                    "description": "系统生成的 Preference 局部稳定标识。"
+                  },
+                  "attitude": {
+                    "enum": ["like", "dislike"],
+                    "description": "对当前对象的基本喜恶方向；强度和具体原因由语义描述表达。"
+                  },
+                  "subject": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 300,
+                    "description": "角色喜欢或厌恶的对象、现象、行为或生活方式。"
+                  },
+                  "description": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000,
+                    "description": "喜恶的具体表现、原因或行为影响。"
+                  },
+                  "related_entity_ref": {
+                    "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0",
+                    "description": "当喜恶明确针对已有 Entity 时保存直接引用；抽象对象可以省略。"
+                  }
+                },
+                "required": ["preference_id", "attitude", "subject"],
+                "additionalProperties": false
+              },
+              "maxItems": 48,
+              "description": "把同一喜恶对象的方向、语义和可选 Entity 引用放在同一项中。"
+            }
+          },
+          "required": ["personality", "motivations", "preferences"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

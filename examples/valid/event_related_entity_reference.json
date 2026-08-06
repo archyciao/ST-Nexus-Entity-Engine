@@ -1,0 +1,11 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "related_entity_refs": [
+      {
+        "id": "item_01K2ABCDEFGHJKMNPQRSTV0009",
+        "type": "item"
+      }
+    ]
+  }
+}

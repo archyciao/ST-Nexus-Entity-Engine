@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:skill:skill_requirement:0.1.0",
+  "title": "SkillRequirementComponent 0.1.0",
+  "description": "保存 Skill 无法仅靠 Entity 引用表达的学习、维持或使用条件。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "requirements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "skill_requirement_id": { "type": "string", "pattern": "^skill_requirement_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "kind": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "requirement_role": { "enum": ["required", "optional", "alternative"] }
+                },
+                "required": ["skill_requirement_id", "kind", "description", "requirement_role"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["requirements"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

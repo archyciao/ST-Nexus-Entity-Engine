@@ -6,16 +6,13 @@
   "type": "object",
   "properties": {
     "id": {
-      "type": "string",
-      "minLength": 1,
-      "maxLength": 128,
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-      "description": "目标 Entity 的稳定 ID；禁止模糊改写其值。"
+      "$ref": "urn:world-simulator:schema:core:entity-id:0.1.0",
+      "description": "目标 Entity 的系统生成稳定 ID；禁止由 AI 编写或模糊改写。"
     },
     "type": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)*$",
-      "description": "目标 Entity 的预期 Type；禁止模糊改写其值。"
+      "description": "目标 Entity 的预期 Type，必须与 ID 前缀一致；禁止模糊改写。"
     }
   },
   "required": ["id", "type"],

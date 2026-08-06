@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:item:item_state:0.1.0",
+  "title": "ItemStateComponent 0.1.0",
+  "description": "保存 Item 当前数量和可独立定位的语义状态。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "quantity": {
+              "type": "object",
+              "properties": {
+                "amount": { "type": "number", "exclusiveMinimum": 0 },
+                "unit": { "type": "string", "minLength": 1, "maxLength": 40 }
+              },
+              "required": ["amount", "unit"],
+              "additionalProperties": false
+            },
+            "states": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "item_state_id": { "type": "string", "pattern": "^item_state_[0-7][0-9A-HJKMNP-TV-Z]{25}$" },
+                  "kind": { "type": "string", "minLength": 1, "maxLength": 100 },
+                  "description": { "type": "string", "minLength": 1, "maxLength": 1500 },
+                  "status": { "enum": ["active", "inactive"] }
+                },
+                "required": ["item_state_id", "kind", "description", "status"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": ["states"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

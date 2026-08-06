@@ -1,0 +1,138 @@
+// 一、文件级总览
+//
+// 功能：展示一个 Character Entity 如何把稳定资料、行为画像、当前状态、
+//      中短期目标、外部引用和可重建索引组织在同一实体中。
+// 架构位置：Character 是 World Entity。Action、Intent 和 Event 不保存在本实体内；
+//          Resolver 读取 Character 后产生候选 Action，正式结果再写入 Event。
+// 输入：用户设定、导入角色卡、已确认 Event 和 State Patch。
+// 运作方式：
+//   1. 先读取 id、type、description 判断是否相关；
+//   2. 加载资料、行为画像、当前状态和目标；
+//   3. 按需要展开 Location、Item、Skill、Memory 和 Relation 引用；
+//   4. 将 Character 与当前场景、Memory、Relation 和规则共同交给 Resolver；
+//   5. 角色变化必须由正式 Event 支撑，再由 State Patch 更新相应 Component。
+// 输出：可供模拟、检索和叙事上下文构建使用的角色数据。
+// 职责边界：本文件不保存 Process 的阶段、期限和进度，也不保存临时 Intent、Action 结果或 Event 正文，
+//          也不让数值替换 Personality、Motivation 或 Preference 的语义描述。
+// 推荐阅读顺序：先看 Core，再看四个 Data Component，最后看 Reference 与 Index。
+
+{
+  // 二、结构级说明
+  //
+  // Core 保存稳定身份与快速摘要；components 按数据职责分组。
+  // id 由系统生成，只包含 type 和无业务语义的 ULID 序列，不含姓名。
+  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+  "type": "character",
+  "description": "华山派大弟子令狐冲，剑术天赋极高，性格洒脱重情。",
+
+  "components": {
+    // 三、字段级说明
+    //
+    // identity 只负责名称。改名不修改 Entity ID。
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {
+        "primary_name": "令狐冲",
+        "aliases": ["大师兄"]
+      }
+    },
+
+    // character_profile 保存相对稳定的客观资料，不保存伤势和情绪。
+    "character_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        // species 使用自然语义，未来可以容纳人类、精怪和具有认知能力的动物。
+        "species": "human",
+        "background": "华山派大弟子。",
+        "appearance": "身形修长，神情常带几分不羁。"
+      }
+    },
+
+    // behavior_profile 一次加载角色的 Personality、若干 Motivation 和 Preference。
+    "character_behavior_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "personality": {
+          "summary": "洒脱重情，不拘泥礼法。",
+          "traits": ["洒脱", "重情"],
+          "behavioral_tendencies": ["朋友受威胁时倾向直接介入。"]
+        },
+        "motivations": [
+          {
+            // motivation_id 由系统生成，是当前组件内的稳定条目标识。
+            // 它不是 Entity ID，未来数值权重可与它关联。
+            "motivation_id": "motivation_01K2ABCDEFGHJKMNPQRSTV0101",
+            "description": "保护自己真正认可的朋友。"
+          }
+        ],
+        "preferences": [
+          {
+            "preference_id": "preference_01K2ABCDEFGHJKMNPQRSTV0103",
+            "attitude": "like",
+            "subject": "美酒",
+            "description": "饮酒能够让他放松。"
+          }
+        ]
+      }
+    },
+
+    // character_state 只保存能够跨场景持续的当前状态。
+    "character_state": {
+      "schema_version": "0.1.0",
+      "data": {
+        "physical_condition": "右肩有未愈剑伤。",
+        "mental_condition": "意识清醒，但保持警惕。",
+        "current_emotions": ["疑惑", "戒备"]
+      }
+    },
+
+    // objectives 可以有多项，每项只保存中短期目标，不保存执行步骤和进度。
+    // objective_id 由系统生成，为以后被一个或多个独立 Process Entity 引用留下稳定接口。
+    "character_objective": {
+      "schema_version": "0.1.0",
+      "data": {
+        "objectives": [
+          {
+            "objective_id": "objective_01K2ABCDEFGHJKMNPQRSTV0105",
+            "description": "查清师父为何怀疑自己的剑法来历。",
+            "horizon": "medium_term"
+          },
+          {
+            "objective_id": "objective_01K2ABCDEFGHJKMNPQRSTV0106",
+            "description": "让仪琳脱离眼前威胁。",
+            "horizon": "short_term"
+          }
+        ]
+      }
+    },
+
+    // Reference 只保存链接和宿主独有语义；目标名称和 Description 读取时形成预览。
+    "skill_reference": {
+      "schema_version": "0.1.0",
+      "data": {
+        "skill_refs": [
+          {
+            "skill_ref": {
+              "id": "skill_01K2ABCDEFGHJKMNPQRSTV000E",
+              "type": "skill"
+            },
+            "proficiency_description": "已经掌握核心剑理，临敌应变极强。"
+          }
+        ]
+      }
+    },
+
+    // Index 是可重建目录；关系内容必须回到目标 Relation Entity 读取。
+    "relation_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "relation_refs": [
+          {
+            "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+            "type": "character_relation"
+          }
+        ]
+      }
+    }
+  }
+}

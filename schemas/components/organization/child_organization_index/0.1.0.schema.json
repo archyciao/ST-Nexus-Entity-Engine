@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:organization:child_organization_index:0.1.0",
+  "title": "ChildOrganizationIndexComponent 0.1.0",
+  "description": "从子 Organization 的 ParentOrganizationReference 重建直接下级目录。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": { "type": "boolean" },
+        "data": {
+          "type": "object",
+          "properties": {
+            "organization_refs": {
+              "type": "array",
+              "items": {
+                "allOf": [
+                  { "$ref": "urn:world-simulator:schema:core:entity-reference:0.1.0" },
+                  { "type": "object", "properties": { "type": { "const": "organization" } } }
+                ]
+              }
+            }
+          },
+          "required": ["organization_refs"],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

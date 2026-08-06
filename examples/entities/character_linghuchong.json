@@ -1,0 +1,205 @@
+{
+  "id": "character_01K2ABCDEFGHJKMNPQRSTV0001",
+  "type": "character",
+  "description": "华山派大弟子令狐冲，剑术天赋极高，性格洒脱重情；目前既想查清师父的猜疑，也希望保护受威胁的朋友。",
+  "components": {
+    "entity_management": {
+      "schema_version": "0.2.0",
+      "data": {
+        "created_at": "2026-07-30T10:00:00+08:00",
+        "updated_at": "2026-07-30T10:00:00+08:00",
+        "data_source": "user_created",
+        "revision": 1,
+        "lifecycle_status": "active"
+      }
+    },
+    "identity": {
+      "schema_version": "0.1.0",
+      "data": {
+        "primary_name": "令狐冲",
+        "aliases": ["大师兄"]
+      }
+    },
+    "character_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "species": "human",
+        "gender": "male",
+        "age_description": "二十五岁左右",
+        "background": "自幼由岳不群夫妇抚养并收入华山派，是华山派大弟子。",
+        "appearance": "身形修长，神情常带几分不羁；饮酒后举止更显洒脱。"
+      }
+    },
+    "character_behavior_profile": {
+      "schema_version": "0.1.0",
+      "data": {
+        "personality": {
+          "summary": "洒脱重情，不拘泥礼法；面对弱者受欺时往往先伸手相助，再考虑门规和后果。",
+          "traits": ["洒脱", "重情", "不拘礼法"],
+          "behavioral_tendencies": [
+            "朋友受威胁时倾向直接介入。",
+            "面对虚伪说辞时容易以讥讽或试探回应。"
+          ]
+        },
+        "motivations": [
+          {
+            "motivation_id": "motivation_01K2ABCDEFGHJKMNPQRSTV0101",
+            "description": "保护自己真正认可的朋友，即使因此违背门规。"
+          },
+          {
+            "motivation_id": "motivation_01K2ABCDEFGHJKMNPQRSTV0102",
+            "description": "希望不受虚伪礼法束缚，按照自己的判断行事。"
+          }
+        ],
+        "preferences": [
+          {
+            "preference_id": "preference_01K2ABCDEFGHJKMNPQRSTV0103",
+            "attitude": "like",
+            "subject": "美酒",
+            "description": "饮酒能够让他放松，也常成为与人建立信任的方式。"
+          },
+          {
+            "preference_id": "preference_01K2ABCDEFGHJKMNPQRSTV0104",
+            "attitude": "dislike",
+            "subject": "以正义之名行虚伪之事",
+            "description": "一旦察觉言行不一，会明显降低信任并倾向试探对方。",
+            "related_entity_ref": {
+              "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+              "type": "character"
+            }
+          }
+        ]
+      }
+    },
+    "character_state": {
+      "schema_version": "0.1.0",
+      "data": {
+        "physical_condition": "右肩有未愈剑伤，能够正常行动，但长时间激战会加重疼痛。",
+        "mental_condition": "意识清醒，对师父近期的试探保持警惕。",
+        "current_emotions": ["疑惑", "戒备"]
+      }
+    },
+    "character_objective": {
+      "schema_version": "0.1.0",
+      "data": {
+        "objectives": [
+          {
+            "objective_id": "objective_01K2ABCDEFGHJKMNPQRSTV0105",
+            "description": "查清岳不群为何怀疑自己的剑法来历。",
+            "horizon": "medium_term",
+            "related_entity_refs": [
+              {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0002",
+                "type": "character"
+              }
+            ]
+          },
+          {
+            "objective_id": "objective_01K2ABCDEFGHJKMNPQRSTV0106",
+            "description": "让仪琳脱离眼前的威胁。",
+            "horizon": "short_term",
+            "related_entity_refs": [
+              {
+                "id": "character_01K2ABCDEFGHJKMNPQRSTV0003",
+                "type": "character"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "current_location_reference": {
+      "schema_version": "0.1.0",
+      "data": {
+        "location_ref": {
+          "id": "location_01K2ABCDEFGHJKMNPQRSTV000A",
+          "type": "location"
+        }
+      }
+    },
+    "inventory_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "item_refs": [
+          {
+            "item_ref": {
+              "id": "item_01K2ABCDEFGHJKMNPQRSTV000C",
+              "type": "item"
+            },
+            "inventory_roles": ["carried", "equipped"]
+          }
+        ]
+      }
+    },
+    "skill_reference": {
+      "schema_version": "0.2.0",
+      "data": {
+        "skill_refs": [
+          {
+            "skill_ref": {
+              "id": "skill_01K2ABCDEFGHJKMNPQRSTV000E",
+              "type": "skill"
+            },
+            "proficiency_description": "已经掌握核心剑理，临敌应变极强，但仍缺乏对部分高深变化的长期沉淀。",
+            "stage_state": {
+              "evaluation_mode": "semantic",
+              "framework_ref": {
+                "id": "skill_01K2ABCDEFGHJKMNPQRSTV000E",
+                "type": "skill"
+              },
+              "current_stage_id": "skill_stage_01K2ABCDEFGHJKMNPQRSTV0604",
+              "numeric_values": []
+            }
+          }
+        ]
+      }
+    },
+    "memory_reference": {
+      "schema_version": "0.1.0",
+      "data": {
+        "memory_refs": [
+          {
+            "memory_ref": {
+              "id": "memory_01K2ABCDEFGHJKMNPQRSTV000S",
+              "type": "memory"
+            },
+            "reference_roles": ["pinned", "active_context"]
+          }
+        ]
+      }
+    },
+    "relation_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "relation_refs": [
+          {
+            "id": "character_relation_01K2ABCDEFGHJKMNPQRSTV000H",
+            "type": "character_relation"
+          }
+        ]
+      }
+    },
+    "history_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "event_refs": [
+          {
+            "id": "event_01K2ABCDEFGHJKMNPQRSTV0011",
+            "type": "event"
+          }
+        ]
+      }
+    },
+    "memory_index": {
+      "schema_version": "0.1.0",
+      "data": {
+        "memory_refs": [
+          {
+            "id": "memory_01K2ABCDEFGHJKMNPQRSTV000S",
+            "type": "memory"
+          }
+        ]
+      }
+    }
+  }
+}

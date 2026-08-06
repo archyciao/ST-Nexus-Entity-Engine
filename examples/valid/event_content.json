@@ -1,0 +1,15 @@
+{
+  "schema_version": "0.1.0",
+  "data": {
+    "status": "pending_finalization",
+    "story_summary": "岳青在山门前说明来意并出示信物，守门弟子核验后准许他入内，后续安顿仍待处理。",
+    "key_details": [
+      {
+        "detail_id": "event_detail_01JQ7Z0NQH6KV8T6B9X7R2M4CP",
+        "kind": "statement",
+        "content": "请代我通报一声。",
+        "fidelity": "verbatim"
+      }
+    ]
+  }
+}
