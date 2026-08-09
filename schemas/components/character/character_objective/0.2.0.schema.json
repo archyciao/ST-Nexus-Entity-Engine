@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:character:character_objective:0.2.0",
+  "title": "character_objective Open Semantic Component 0.2.0",
+  "description": "开放语义资料：字段随明确事实填写；定位、引用和关系仍由专门 Component 管理。",
+  "allOf": [
+    {
+      "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "const": "0.2.0"
+        },
+        "enabled": false,
+        "data": {
+          "$ref": "urn:world-simulator:schema:core:open-semantic-data:0.1.0"
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

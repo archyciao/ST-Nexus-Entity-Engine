@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:component:core:entity_field_maintenance:0.1.0",
+  "title": "EntityFieldMaintenanceComponent 0.1.0",
+  "description": "保存不能安全自动归类的字段更新和被修订字段的旧值，仅供维护与追溯。",
+  "allOf": [
+    { "$ref": "urn:world-simulator:schema:core:component-envelope:0.1.0" },
+    {
+      "type": "object",
+      "properties": {
+        "schema_version": { "const": "0.1.0" },
+        "enabled": false,
+        "data": {
+          "type": "object",
+          "properties": {
+            "unclassified_updates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "update_id": { "type": "string", "pattern": "^field_update_[0-9A-HJKMNP-TV-Z]{26}$" },
+                  "proposed_field_name": { "type": "string" },
+                  "value": {},
+                  "reason": { "type": "string", "minLength": 1 },
+                  "evidence_refs": { "type": "array", "items": { "type": "object" } }
+                },
+                "required": ["update_id", "proposed_field_name", "value", "reason", "evidence_refs"],
+                "additionalProperties": false
+              }
+            },
+            "revision_history": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "revision_id": { "type": "string", "pattern": "^field_revision_[0-9A-HJKMNP-TV-Z]{26}$" },
+                  "field_name": { "type": "string", "minLength": 1 },
+                  "previous_value": {},
+                  "replaced_by_evidence_refs": { "type": "array", "items": { "type": "object" } }
+                },
+                "required": ["revision_id", "field_name", "previous_value", "replaced_by_evidence_refs"],
+                "additionalProperties": false
+              }
+            }
+          },
+          "anyOf": [
+            { "required": ["unclassified_updates"] },
+            { "required": ["revision_history"] }
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  ],
+  "unevaluatedProperties": false
+}

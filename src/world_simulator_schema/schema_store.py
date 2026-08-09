@@ -220,6 +220,7 @@ class SchemaStore:
         schema: dict[str, Any],
         base: str,
     ) -> None:
+        preserves_unknown_fields = component.get("unknown_field_policy") == "preserve"
         declarations = [
             (
                 component.get("permissions", {}).get("fields", []),
@@ -235,8 +236,12 @@ class SchemaStore:
         for items, code, label in declarations:
             for index, item in enumerate(items):
                 path = item.get("path")
-                if isinstance(path, str) and not instance_path_exists(
+                if (
+                    not preserves_unknown_fields
+                    and isinstance(path, str)
+                    and not instance_path_exists(
                     schema, path, self.schema_by_id
+                    )
                 ):
                     issues.append(
                         RegistryIssue(
@@ -263,7 +268,7 @@ class SchemaStore:
                 else {}
             )
             id_field = rule.get("id_field")
-            if id_field not in properties:
+            if not preserves_unknown_fields and id_field not in properties:
                 issues.append(
                     RegistryIssue(
                         "REGISTRY_ITEM_ID_PATH_MISSING",
@@ -289,7 +294,10 @@ class SchemaStore:
                 if isinstance(object_schema, dict)
                 else {}
             )
-            if alias.get("canonical") not in properties:
+            if (
+                not preserves_unknown_fields
+                and alias.get("canonical") not in properties
+            ):
                 issues.append(
                     RegistryIssue(
                         "REGISTRY_ALIAS_TARGET_MISSING",
@@ -330,7 +338,7 @@ class SchemaStore:
                 else None
             )
             issue_path = f"{base}/correction/value_aliases/{index}"
-            if target_schema is None:
+            if target_schema is None and not preserves_unknown_fields:
                 issues.append(
                     RegistryIssue(
                         "REGISTRY_VALUE_ALIAS_PATH_MISSING",
@@ -357,6 +365,8 @@ class SchemaStore:
                     allowed_values = target_schema["enum"]
                 elif "const" in target_schema:
                     allowed_values = [target_schema["const"]]
+            if preserves_unknown_fields:
+                continue
             if allowed_values is None:
                 issues.append(
                     RegistryIssue(

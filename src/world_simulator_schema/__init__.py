@@ -11,6 +11,7 @@ from .entity_extraction import (
     ENTITY_ENRICHMENT_SYSTEM_PROMPTS,
     EntityEnrichmentJob,
     plan_entity_enrichment_jobs,
+    resolve_entity_directory,
 )
 from .entity_network import (
     EntityNetworkValidationReport,
@@ -18,6 +19,7 @@ from .entity_network import (
     rebuild_derived_indexes,
 )
 from .entity_validator import EntityValidationReport, EntityValidator
+from .entity_types import CURRENT_ENTITY_TYPES, CURRENT_ENTITY_TYPE_IDS
 from .event_context import build_event_recall_pack
 from .stage_context import (
     StageContextError,
@@ -29,6 +31,8 @@ from .validator import ComponentValidator, ValidationReport
 
 __all__ = [
     "ComponentValidator",
+    "CURRENT_ENTITY_TYPES",
+    "CURRENT_ENTITY_TYPE_IDS",
     "ENTITY_DISCOVERY_SYSTEM_PROMPT",
     "ENTITY_ENRICHMENT_SYSTEM_PROMPTS",
     "EntityEnrichmentJob",
@@ -46,6 +50,7 @@ __all__ = [
     "new_entity_id",
     "new_local_id",
     "plan_entity_enrichment_jobs",
+    "resolve_entity_directory",
     "rebuild_derived_indexes",
     "validate_stage_framework",
 ]

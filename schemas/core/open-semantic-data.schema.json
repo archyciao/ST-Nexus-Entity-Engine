@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:world-simulator:schema:core:open-semantic-data:0.1.0",
+  "title": "Open Semantic Component Data",
+  "description": "供开放语义 Component 使用：保存清晰事实，但不预设世界题材中的全部字段。",
+  "type": "object",
+  "minProperties": 1,
+  "additionalProperties": true
+}

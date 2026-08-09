@@ -79,6 +79,7 @@ class DocumentationTemplateTests(unittest.TestCase):
                 "character_relation_state",
                 "entity_management",
                 "entity_facts",
+                "entity_field_maintenance",
                 "environment_profile",
                 "event_content",
                 "event_location_reference",

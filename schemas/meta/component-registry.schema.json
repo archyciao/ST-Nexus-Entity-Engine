@@ -214,7 +214,7 @@
           "uniqueItems": true
         },
         "allow_disable": { "type": "boolean" },
-        "unknown_field_policy": { "const": "reject" },
+        "unknown_field_policy": { "enum": ["reject", "preserve"] },
         "permissions": { "$ref": "#/$defs/permissions" },
         "ai": {
           "type": "object",

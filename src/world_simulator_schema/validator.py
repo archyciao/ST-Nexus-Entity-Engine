@@ -122,6 +122,8 @@ class ComponentValidator:
             )
 
         source_version = instance.get("schema_version")
+        if not isinstance(source_version, str):
+            source_version = instance.get("schemaVersion")
         try:
             provisional_schema = self.store.schema_for_component(
                 component_name,

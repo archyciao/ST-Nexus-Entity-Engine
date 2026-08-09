@@ -1,0 +1,54 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- A true projected icosahedron. Rear structure is visible as a dim
+       wireframe, but it is painted below the bright front edges. -->
+  <g>
+    <path d="M22.9 7.4 50.1 14.7 30 26.3Z" fill="#27313C"/>
+    <path d="M22.9 7.4 30 26.3 7 30.6Z" fill="#202933"/>
+    <path d="M50.1 14.7 51 42.4 30 26.3Z" fill="#171E27"/>
+    <path d="M51 42.4 24.4 52.2 30 26.3Z" fill="#252F3A"/>
+    <path d="M24.4 52.2 7 30.6 30 26.3Z" fill="#131A22"/>
+    <path d="M50.1 14.7 57 33.4 51 42.4Z" fill="#10161D"/>
+    <path d="M51 42.4 41.1 56.6 24.4 52.2Z" fill="#1B232C"/>
+    <path d="M24.4 52.2 13.9 49.3 7 30.6Z" fill="#10161D"/>
+    <path d="M7 30.6 13 21.6 22.9 7.4Z" fill="#1A222B"/>
+    <path d="M22.9 7.4 39.6 11.8 50.1 14.7Z" fill="#111820"/>
+  </g>
+
+  <g stroke="#8B949E" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" opacity="0.58">
+    <path d="M13 21.6 13.9 49.3 34 37.7 13 21.6Z"/>
+    <path d="M13 21.6 39.6 11.8 34 37.7"/>
+    <path d="M41.1 56.6 13.9 49.3 34 37.7 41.1 56.6Z"/>
+    <path d="M41.1 56.6 57 33.4 34 37.7"/>
+    <path d="M39.6 11.8 57 33.4 34 37.7 39.6 11.8Z"/>
+  </g>
+  <g fill="#8B949E" opacity="0.92">
+    <circle cx="13" cy="21.6" r="1.8"/>
+    <circle cx="41.1" cy="56.6" r="1.8"/>
+    <circle cx="13.9" cy="49.3" r="1.8"/>
+    <circle cx="34" cy="37.7" r="1.8"/>
+    <circle cx="39.6" cy="11.8" r="1.8"/>
+    <circle cx="57" cy="33.4" r="1.8"/>
+  </g>
+
+  <g fill="none" stroke="#FFFFFF" stroke-width="1.9" stroke-linejoin="round">
+    <path d="M22.9 7.4 50.1 14.7 30 26.3Z"/>
+    <path d="M22.9 7.4 30 26.3 7 30.6Z"/>
+    <path d="M50.1 14.7 51 42.4 30 26.3Z"/>
+    <path d="M51 42.4 24.4 52.2 30 26.3Z"/>
+    <path d="M24.4 52.2 7 30.6 30 26.3Z"/>
+    <path d="M50.1 14.7 57 33.4 51 42.4Z"/>
+    <path d="M51 42.4 41.1 56.6 24.4 52.2Z"/>
+    <path d="M24.4 52.2 13.9 49.3 7 30.6Z"/>
+    <path d="M7 30.6 13 21.6 22.9 7.4Z"/>
+    <path d="M22.9 7.4 39.6 11.8 50.1 14.7Z"/>
+  </g>
+
+  <g fill="#FFFFFF">
+    <circle cx="22.9" cy="7.4" r="2.35"/>
+    <circle cx="51" cy="42.4" r="2.35"/>
+    <circle cx="30" cy="26.3" r="2.6"/>
+    <circle cx="50.1" cy="14.7" r="2.35"/>
+    <circle cx="7" cy="30.6" r="2.35"/>
+    <circle cx="24.4" cy="52.2" r="2.35"/>
+  </g>
+</svg>

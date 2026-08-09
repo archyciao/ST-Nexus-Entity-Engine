@@ -146,10 +146,14 @@ class EventExtractionV2Tests(unittest.TestCase):
         self.assertIn("原则上不超过 500 个汉字", content_prompt)
         self.assertNotIn("title", content_prompt)
 
-        entity_prompt = V2.ENTITY_FACT_SYSTEM_PROMPT
-        self.assertIn("facts_patch 是开放事实对象", entity_prompt)
-        self.assertNotIn("character_data_patch", entity_prompt)
-        self.assertNotIn("domain_data_patch", entity_prompt)
+        create_prompt = V2.ENTITY_CREATE_SYSTEM_PROMPT
+        update_prompt = V2.ENTITY_UPDATE_SYSTEM_PROMPT
+        self.assertIn("semantic_fields", create_prompt)
+        self.assertIn("只更新 record_action=update 的对象", update_prompt)
+        self.assertIn("supplement", update_prompt)
+        self.assertIn("revise", update_prompt)
+        self.assertNotIn("character_data_patch", create_prompt)
+        self.assertNotIn("domain_data_patch", update_prompt)
 
         relation_prompt = V2.RELATION_REFERENCE_SYSTEM_PROMPT
         self.assertIn("event_locations", relation_prompt)
@@ -291,6 +295,44 @@ class EventExtractionV2Tests(unittest.TestCase):
             [item["entity_key"] for item in normalized["events"][0]["entity_roster"]],
         )
 
+    def test_cross_type_name_conflict_stays_unresolved_even_with_exact_key(self) -> None:
+        state = LEGACY.initial_unified_state()
+        state["entity_candidates"] = {
+            "location:青山": {
+                "entity_key": "location:青山",
+                "type": "location",
+                "primary_name": "青山",
+                "aliases": [],
+            },
+            "organization:青山": {
+                "entity_key": "organization:青山",
+                "type": "organization",
+                "primary_name": "青山",
+                "aliases": [],
+            },
+        }
+        raw = {
+            "events": [
+                {
+                    "start_quote": "甲在驿站与乙交谈",
+                    "entity_roster": [
+                        {
+                            "type": "location",
+                            "primary_name": "青山",
+                            "aliases": [],
+                            "evidence_quote": "抵达青山后",
+                        }
+                    ],
+                }
+            ]
+        }
+
+        normalized = V2.normalize_narrative_map(raw, state, sources())
+        roster = normalized["events"][0]["entity_roster"][0]
+
+        self.assertEqual("unresolved", roster["record_action"])
+        self.assertNotIn("existing_entity", roster)
+
     def test_unique_verbatim_fragment_recovers_boundary(self) -> None:
         raw = {
             "events": [
@@ -338,7 +380,7 @@ class EventExtractionV2Tests(unittest.TestCase):
         self.assertEqual("王岳青", canonical["entities"][0]["primary_name"])
         self.assertEqual(["王师弟"], canonical["entities"][0]["aliases_add"])
 
-    def test_entity_facts_normalize_to_open_patch_and_generic_evidence(self) -> None:
+    def test_entity_create_normalizes_named_open_components_and_evidence(self) -> None:
         raw = {
             "entities": [
                 {
@@ -350,21 +392,215 @@ class EventExtractionV2Tests(unittest.TestCase):
                     "evidence": [
                         {"source_ref": "r0001.assistant", "quote": "甲在驿站"}
                     ],
-                    "facts_patch": {
-                        "材质": "凡铁",
-                        "当前状况": ["剑刃有缺口", "仍可使用"],
+                    "semantic_fields": {
+                        "item_profile": {"材质": "凡铁"},
+                        "item_characteristic": {
+                            "当前状况": ["剑刃有缺口", "仍可使用"]
+                        },
                     },
                 }
             ]
         }
-        plan = RUNNER.normalize_entity_fact_plan(
-            raw, state=LEGACY.initial_unified_state(), rounds=rounds()
+        plan = RUNNER.normalize_entity_create_plan(
+            raw,
+            state=LEGACY.initial_unified_state(),
+            rounds=rounds(),
+            allowed_entity_keys=frozenset({"item:旧剑"}),
         )
         entity = plan["entities"][0]
-        self.assertEqual({"材质": "凡铁", "当前状况": ["剑刃有缺口", "仍可使用"]}, entity["facts_patch"])
+        updates = {
+            item["field_name"]: item["value"]
+            for item in entity["semantic_field_updates"]
+        }
+        self.assertEqual({"材质": "凡铁"}, updates["item_profile"])
+        self.assertEqual(
+            {"当前状况": ["剑刃有缺口", "仍可使用"]},
+            updates["item_characteristic"],
+        )
         self.assertEqual(["r0001.assistant"], entity["evidence_refs"])
         self.assertEqual("甲在驿站", entity["event_link_evidence"][0]["quote"])
+        self.assertNotIn("facts_patch", entity)
         self.assertNotIn("domain_data_patch", entity)
+
+    def test_entity_update_is_field_level_and_preserves_revision_history(self) -> None:
+        state = LEGACY.initial_unified_state()
+        state["entity_candidates"]["item:旧剑"] = {
+            "entity_key": "item:旧剑",
+            "type": "item",
+            "primary_name": "旧剑",
+            "aliases": [],
+            "description": "一柄旧剑。",
+            "semantic_fields": {
+                "item_profile": {"材质": "凡铁", "形制": "长剑"},
+                "item_characteristic": {"状态": "尚可使用"},
+            },
+        }
+        raw = {
+            "entities": [
+                {
+                    "entity_key": "item:旧剑",
+                    "aliases_add": [],
+                    "field_updates": [
+                        {
+                            "field_name": "item_characterstic",
+                            "relationship_to_old": "supplement",
+                            "value": {"用途": "练剑"},
+                            "evidence": [
+                                {"source_ref": "r0001.assistant", "quote": "甲在驿站"}
+                            ],
+                        },
+                        {
+                            "field_name": "item_profile",
+                            "relationship_to_old": "revise",
+                            "value": {"材质": "精钢"},
+                            "evidence": [
+                                {"source_ref": "r0001.assistant", "quote": "甲在驿站"}
+                            ],
+                        },
+                        {
+                            "field_name": "misc_notes",
+                            "relationship_to_old": "supplement",
+                            "value": {"记录": "无法可靠归类"},
+                            "evidence": [
+                                {"source_ref": "r0001.assistant", "quote": "甲在驿站"}
+                            ],
+                        },
+                    ],
+                }
+            ]
+        }
+
+        plan = RUNNER.normalize_entity_update_plan(
+            raw,
+            state=state,
+            rounds=rounds(),
+            allowed_entity_keys=frozenset({"item:旧剑"}),
+        )
+        updated = LEGACY.apply_entity_candidates(state, plan)
+        candidate = updated["entity_candidates"]["item:旧剑"]
+        self.assertEqual(
+            {"状态": "尚可使用", "用途": "练剑"},
+            candidate["semantic_fields"]["item_characteristic"],
+        )
+        self.assertEqual(
+            {"材质": "精钢"}, candidate["semantic_fields"]["item_profile"]
+        )
+        self.assertEqual(
+            {"材质": "凡铁", "形制": "长剑"},
+            candidate["semantic_field_revisions"][0]["previous_value"],
+        )
+        self.assertEqual(
+            "misc_notes",
+            candidate["unclassified_field_updates"][0]["proposed_field_name"],
+        )
+
+        network, report = LEGACY.materialize_network(updated)
+        self.assertTrue(report["valid"], report)
+        item = next(entity for entity in network if entity["type"] == "item")
+        self.assertEqual(
+            "0.2.0", item["components"]["item_profile"]["schema_version"]
+        )
+        self.assertIn("entity_field_maintenance", item["components"])
+
+    def test_protected_reference_like_values_are_isolated_from_open_facts(self) -> None:
+        raw = {
+            "entities": [
+                {
+                    "entity_key": "item:旧剑",
+                    "type": "item",
+                    "primary_name": "旧剑",
+                    "aliases_add": [],
+                    "description": "一柄旧剑。",
+                    "evidence": [
+                        {"source_ref": "r0001.assistant", "quote": "甲在驿站"}
+                    ],
+                    "semantic_fields": {
+                        "item_profile": {
+                            "材质": "凡铁",
+                            "owner_ref": {"id": "character_fake", "type": "character"},
+                        }
+                    },
+                }
+            ]
+        }
+        plan = RUNNER.normalize_entity_create_plan(
+            raw,
+            state=LEGACY.initial_unified_state(),
+            rounds=rounds(),
+            allowed_entity_keys=frozenset({"item:旧剑"}),
+        )
+        entity = plan["entities"][0]
+        self.assertEqual(
+            {"材质": "凡铁"}, entity["semantic_field_updates"][0]["value"]
+        )
+        self.assertEqual(
+            "protected_identity_or_reference_field",
+            entity["unclassified_field_updates"][0]["reason"],
+        )
+
+    def test_entity_workloads_and_reasoning_defaults_are_explicit(self) -> None:
+        segments = [
+            {
+                "partition_key": "segment_1",
+                "assigned_messages": [],
+                "entity_roster": [
+                    {"entity_key": "character:甲", "record_action": "create"},
+                    {"entity_key": "location:山门", "record_action": "update"},
+                    {"entity_key": "item:同名物", "record_action": "unresolved"},
+                ],
+            }
+        ]
+        workloads = V2.split_entity_workloads(segments)
+        self.assertEqual(
+            ["character:甲"],
+            [item["entity_key"] for item in workloads["create"][0]["entity_roster"]],
+        )
+        self.assertEqual(
+            ["location:山门"],
+            [item["entity_key"] for item in workloads["update"][0]["entity_roster"]],
+        )
+        args = RUNNER.parse_args(
+            ["chat.jsonl", "--endpoint", "https://example.test", "--model", "test", "--output", "out.md"]
+        )
+        self.assertEqual(4, args.stage2_workers)
+        self.assertEqual(
+            {"high"},
+            {args.map_thinking, args.event_thinking, args.entity_thinking, args.relation_thinking},
+        )
+
+    def test_roster_covers_skill_and_concept_before_identity_resolution(self) -> None:
+        self.assertIn("skill", V2.ROSTER_TYPES)
+        self.assertIn("concept", V2.ROSTER_TYPES)
+        self.assertIn("skill、concept 六者之一", V2.NARRATIVE_MAP_SYSTEM_PROMPT)
+
+    def test_entity_create_cannot_add_an_object_outside_resolved_directory(self) -> None:
+        raw = {
+            "entities": [
+                {
+                    "entity_key": "skill:目录外剑法",
+                    "type": "skill",
+                    "primary_name": "目录外剑法",
+                    "aliases_add": [],
+                    "description": "不应绕过目录建立。",
+                    "evidence": [
+                        {"source_ref": "r0001.assistant", "quote": "甲在驿站"}
+                    ],
+                    "semantic_fields": {"skill_definition": {"说明": "剑法"}},
+                }
+            ]
+        }
+
+        plan = RUNNER.normalize_entity_create_plan(
+            raw,
+            state=LEGACY.initial_unified_state(),
+            rounds=rounds(),
+            allowed_entity_keys=frozenset({"item:旧剑"}),
+        )
+
+        self.assertEqual([], plan["entities"])
+        self.assertTrue(
+            any("目录外实体" in warning for warning in plan["script_normalization_warnings"])
+        )
 
     def test_relation_task_keeps_actual_location_separate_from_generic_roster(self) -> None:
         state = LEGACY.initial_unified_state()
@@ -422,6 +658,76 @@ class EventExtractionV2Tests(unittest.TestCase):
         )
         character = next(item for item in plan["entities"] if item["entity_key"] == "character:甲")
         self.assertNotIn("current_location_key", character.get("character_data_patch", {}))
+
+    def test_relation_task_cannot_create_an_object_outside_resolved_directory(self) -> None:
+        raw = {
+            "reference_updates": [
+                {
+                    "entity_key": "item:目录外宝物",
+                    "source_ref": "r0001.assistant",
+                    "evidence_quote": "甲在驿站",
+                }
+            ],
+            "event_locations": [],
+            "relations": [],
+        }
+
+        plan = RUNNER.normalize_relation_reference_plan(
+            raw,
+            event_rosters=fixed_segments(),
+            state=LEGACY.initial_unified_state(),
+            rounds=rounds(),
+        )
+
+        self.assertFalse(
+            any(item["entity_key"] == "item:目录外宝物" for item in plan["entities"])
+        )
+        self.assertTrue(
+            any("目录外实体" in warning for warning in plan["script_normalization_warnings"])
+        )
+
+    def test_richer_entity_content_wins_over_relation_roster_fallback(self) -> None:
+        state = LEGACY.initial_unified_state()
+        relation_plan = {
+            "entities": [
+                {
+                    "entity_key": "item:旧剑",
+                    "type": "item",
+                    "primary_name": "旧剑",
+                    "description": "本批故事中形成清楚事实的物品“旧剑”。",
+                    "aliases_add": [],
+                    "evidence_refs": ["r0001.assistant"],
+                }
+            ],
+            "relations": [],
+        }
+        create_plan = {
+            "entities": [
+                {
+                    "entity_key": "item:旧剑",
+                    "type": "item",
+                    "primary_name": "旧剑",
+                    "description": "甲长期使用、剑刃已有缺口的凡铁长剑。",
+                    "aliases_add": ["佩剑"],
+                    "evidence_refs": ["r0001.assistant"],
+                }
+            ],
+            "relations": [],
+        }
+
+        updated = RUNNER.apply_stage2_entity_plans(
+            state,
+            relation_plan=relation_plan,
+            create_plan=create_plan,
+        )
+
+        self.assertEqual(
+            "甲长期使用、剑刃已有缺口的凡铁长剑。",
+            updated["entity_candidates"]["item:旧剑"]["description"],
+        )
+        self.assertEqual(
+            ["佩剑"], updated["entity_candidates"]["item:旧剑"]["aliases"]
+        )
 
     def test_key_detail_actor_is_not_cleared_by_participation_classification(self) -> None:
         boundary = {

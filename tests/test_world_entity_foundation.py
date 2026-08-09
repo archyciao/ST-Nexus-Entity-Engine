@@ -11,7 +11,10 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from world_simulator_schema.entity_extraction import plan_entity_enrichment_jobs
+from world_simulator_schema.entity_extraction import (
+    plan_entity_enrichment_jobs,
+    resolve_entity_directory,
+)
 from world_simulator_schema.entity_ids import new_entity_id, new_local_id
 from world_simulator_schema.entity_network import (
     EntityNetworkValidator,
@@ -174,7 +177,7 @@ class StageContextTests(unittest.TestCase):
 
 
 class EntityExtractionPlanningTests(unittest.TestCase):
-    def test_discovery_creates_at_most_one_enrichment_job_per_changed_type(self) -> None:
+    def test_discovery_creates_one_batch_job_per_record_action(self) -> None:
         discovery = {
             "entities": [
                 {
@@ -214,11 +217,69 @@ class EntityExtractionPlanningTests(unittest.TestCase):
             ],
         )
 
+        self.assertEqual(["update"], [job.record_action for job in jobs])
         self.assertEqual(["all"], [job.entity_type for job in jobs])
         self.assertEqual(3, len(jobs[0].payload["candidates"]))
         self.assertEqual(
             {"r1", "r2", "r3"},
             {item["ref"] for item in jobs[0].payload["source_messages"]},
+        )
+
+    def test_directory_resolution_separates_create_update_and_ambiguity(self) -> None:
+        resolved = resolve_entity_directory(
+            {
+                "entities": [
+                    {
+                        "entity_key": "character:大师兄",
+                        "type": "character",
+                        "primary_name": "大师兄",
+                        "aliases_add": [],
+                    },
+                    {
+                        "entity_key": "item:新剑",
+                        "type": "item",
+                        "primary_name": "新剑",
+                        "aliases_add": [],
+                    },
+                    {
+                        "entity_key": "location:青云",
+                        "type": "location",
+                        "primary_name": "青云",
+                        "aliases_add": [],
+                    },
+                ]
+            },
+            existing_previews=[
+                {
+                    "entity_key": "character:令狐冲",
+                    "type": "character",
+                    "primary_name": "令狐冲",
+                    "aliases": ["大师兄"],
+                },
+                {
+                    "entity_key": "location:青云",
+                    "type": "location",
+                    "primary_name": "青云",
+                    "aliases": [],
+                },
+                {
+                    "entity_key": "organization:青云",
+                    "type": "organization",
+                    "primary_name": "青云",
+                    "aliases": [],
+                },
+            ],
+        )
+
+        self.assertEqual("character:令狐冲", resolved["update"][0]["entity_key"])
+        self.assertEqual("item:新剑", resolved["create"][0]["entity_key"])
+        self.assertEqual(
+            "cross_type_name_conflict",
+            resolved["unresolved"][0]["resolution_reason"],
+        )
+        self.assertEqual(
+            {"location:青云", "organization:青云"},
+            set(resolved["unresolved"][0]["candidate_entity_keys"]),
         )
 
 

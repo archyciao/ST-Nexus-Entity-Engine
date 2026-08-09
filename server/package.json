@@ -1,0 +1,6 @@
+{
+  "name": "nexus-entity-engine-server",
+  "private": true,
+  "type": "module",
+  "main": "index.mjs"
+}

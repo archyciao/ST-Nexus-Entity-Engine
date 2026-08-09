@@ -11,8 +11,12 @@
 | `tools` | 命令行入口与可复现实验 | Schema 与世界语义的权威定义 |
 | `tests` | 自动回归验证 | 生产数据 |
 | `docs` | 运行、维护说明及不参与运行的中文说明模板 | Obsidian 权威设计全文 |
+| 根目录 `index.js`、`style.css`、`manifest.json`、`assets`、`ui` | Tavern 前端扩展；读取正式核心元数据，不保存第二份 Entity／提示词规则 | 独立业务 Schema、复制的默认提示词 |
+| `server` | Tavern 宿主适配、全局配置库、每聊天实体／运行分库和批量进程 | Entity 语义与校验规则副本 |
 
 根目录 `nexus.cmd`、`nexus.ps1` 与 `nexus.sh` 是源码仓库的统一入口：自动在当前目录创建或重建 `.venv`，优先按 `uv.lock` 同步，缺少 uv 时使用本机 Python 与 pip。`.venv` 不随仓库分发。未来玩家使用的 Tavern 构建产物不得依赖这些 Python 开发入口。
+
+仓库根目录本身也是 Tavern 插件的唯一源码。实验安装只使用目录联接：前端扩展指向仓库根目录，服务端插件指向 `server`；不得再建立 `integrations/sillytavern/NexusEntityEngine` 或手工复制后双向修改。
 
 新增 Component 时，必须同时增加版本化 Schema、Registry 条目和相应测试样例。
 
@@ -24,13 +28,15 @@ Character Relation 的逻辑唯一性是“同一世界中的同一无序人物�
 
 `src/world_simulator_schema/stage_context.py` 只负责 Skill/Concept 阶段结构校验与运行时最小投影。普通回合只返回当前阶段和匹配用途的 Context Block；MUV 缺失、区间重叠或映射失效时返回明确错误，不加载全部阶段兜底。
 
-`src/world_simulator_schema/entity_extraction.py` 负责规划一次跨 Type 发现和至多一次开放事实补充。它只生成任务，不调用模型、不生成 ID、不写数据库。名称、Type、引用与 Relation 保持严格；其他资料进入 `entity_facts`，不要求每个 Type 填固定模板。
+`src/world_simulator_schema/entity_extraction.py` 负责规划跨 Type 目录发现，并由脚本把目录解析为新增、更新或待确认。新增与更新各形成至多一个批量任务；待确认对象不进入模型细化。它只生成任务，不调用模型、不生成 ID、不写数据库。名称、Type、引用与 Relation 保持严格；其他资料进入各 Type 已命名的开放语义 Component。
 
 `tools/event_segmentation_probe.py` 保留 Event 历史分阶段复测入口，不是正式 Event Schema，也不代表当前默认生产调用方案。它将分段开头转成排他性起止限制，并保存完整提示词、模型正式回复、机器结果和检查点。
 
 `tools/opencode_thinking_probe.py` 用固定的极短请求单独诊断 Zen Chat Completions 是否实际遵从“官方 `thinking.type=disabled` + Zen 实测 `reasoning_effort=none`”组合。它只记录正式正文、请求控制字段、时延和隐藏推理字数，不保存隐藏推理原文或 API 密钥，不能代替 Event 语义测试。
 
-`tools/airp_extraction_v2_probe.py` 是当前开发期复测入口。第一次模型调用返回较粗 Event 起点和各段实体名录；脚本校验后形成固定分段；第二层并发生成 Event 内容、开放 Entity 事实、Relation 与严格引用。脚本负责旧 Event 衔接、名称归一、普通 Event 关联、实际地点、Memory 链路和反向 Index。`tools/airp_extraction_probe.py` 保留历史回归与 V2 共用的稳定工具函数，不作为当前提示词权威。运行证据与世界数据库分开保存。
+`tools/airp_extraction_v2_probe.py` 是当前开发期复测入口。第一次模型调用返回较粗 Event 起点和各段实体名录；脚本校验边界，并把名录分成新增、更新和待确认；第二层按实际候选并发运行 Event 内容、Entity 新建、Entity 字段级更新、Relation 与严格引用。脚本负责旧 Event 衔接、名称归一、普通 Event 关联、实际地点、字段补充／修订、维护收件箱、Memory 链路和反向 Index。默认模型推理强度为 `high`，可由命令行覆盖。`tools/airp_extraction_probe.py` 保留历史回归与 V2 共用的稳定工具函数，不作为当前提示词权威。运行证据与世界数据库分开保存。
+
+`tools/plugin_bridge.py` 只把正式 Entity Type、Registry、Schema、提示词常量和 EntityValidator 暴露给宿主；`tools/tavern_batch_runner.py` 只把 Tavern 批量参数交给正式 V2 提取器并输出可导入结果。两者都不得重新实现业务规则。
 
 `src/world_simulator_schema/event_context.py` 构建有硬预算的 Event 常规召回包。它采用字段白名单，不输出来源书签、边界位置或后台原文；预算不足时先省略特写，再省略摘要和低相关 Event，不截断句子。
 

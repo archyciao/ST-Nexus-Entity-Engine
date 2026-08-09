@@ -9,6 +9,7 @@ V2 第一次按完整局部故事直接返回短窗口内的 Event 起点和各 
 from __future__ import annotations
 
 from copy import deepcopy
+from difflib import SequenceMatcher
 import re
 import unicodedata
 from typing import Any, Iterable
@@ -22,7 +23,87 @@ PREVIOUS_TO_BATCH_BOUNDARY_ID = "previous_tail_to_current_batch"
 BOUNDARY_TEXT_WINDOW_CHARS = 700
 QUOTE_FRAGMENT_MIN_CHARS = 10
 CONTEXTUAL_CHARACTER_NAMES = {"你", "我", "主角", "玩家", "玩家角色"}
-ROSTER_TYPES = {"character", "location", "item", "organization"}
+ROSTER_TYPES = {
+    "character",
+    "location",
+    "item",
+    "organization",
+    "skill",
+    "concept",
+}
+ENTITY_RECORD_ACTIONS = {"create", "update", "unresolved"}
+FIELD_RELATIONSHIPS = {"supplement", "revise"}
+
+# 这些名称是开放语义资料的正式落点。模型可以自由组织每个 Component 内的
+# 内容，但不能把 ID、位置、关系端点或反向索引伪装成开放字段。
+OPEN_SEMANTIC_COMPONENTS: dict[str, tuple[str, ...]] = {
+    "character": (
+        "character_profile",
+        "character_behavior_profile",
+        "character_state",
+        "character_objective",
+    ),
+    "location": (
+        "location_profile",
+        "environment_profile",
+        "location_atmosphere",
+        "location_state",
+    ),
+    "item": (
+        "item_profile",
+        "item_characteristic",
+    ),
+    "organization": (
+        "organization_profile",
+        "organization_structure",
+        "organization_culture",
+        "organization_strategy",
+        "organization_objective",
+        "organization_state",
+    ),
+    "skill": (
+        "skill_definition",
+        "skill_characteristic",
+    ),
+    "concept": (
+        "concept_definition",
+        "applicability",
+    ),
+}
+
+SEMANTIC_COMPONENT_ALIASES = {
+    "profile": {
+        "character": "character_profile",
+        "location": "location_profile",
+        "item": "item_profile",
+        "organization": "organization_profile",
+    },
+    "behavior_profile": {"character": "character_behavior_profile"},
+    "behaviour_profile": {"character": "character_behavior_profile"},
+    "personality": {"character": "character_behavior_profile"},
+    "state": {
+        "character": "character_state",
+        "location": "location_state",
+        "organization": "organization_state",
+    },
+    "objective": {
+        "character": "character_objective",
+        "organization": "organization_objective",
+    },
+    "environment": {"location": "environment_profile"},
+    "atmosphere": {"location": "location_atmosphere"},
+    "characteristic": {
+        "item": "item_characteristic",
+        "skill": "skill_characteristic",
+    },
+    "culture": {"organization": "organization_culture"},
+    "strategy": {"organization": "organization_strategy"},
+    "structure": {"organization": "organization_structure"},
+    "definition": {
+        "skill": "skill_definition",
+        "concept": "concept_definition",
+    },
+}
 TYPE_ALIASES = {
     "character": "character",
     "person": "character",
@@ -68,10 +149,11 @@ story_context 中的相邻前文按故事顺序放在本批正文之前，只用
 系统状态，脚本会根据起点所在位置处理。
 
 【Event 内实体名录】
-每项名录记录本批正文在该 Event 中形成清楚事实的 character、location、item、organization；门派、
-阵营使用 organization。这里不判断对象是否实际参与，也不把提及、计划或回忆分成不同类别。同一对象
-涉及多项 Event 时分别列出，并各用该 Event 内的本批原文作证。优先沿用既有实体的实际名称；“你、我、
-主角”等不是人物姓名。没有实际姓名时使用稳定、可区分的未具名身份，不虚构姓名。
+每项名录记录本批正文在该 Event 中形成清楚事实的 character、location、item、organization、skill、
+concept；门派、阵营使用 organization，可学习或施展的命名能力使用 skill，需要跨场景定义或适用判断的
+规则、制度、理论和术语使用 concept。这里不判断对象是否实际参与，也不把提及、计划或回忆分成不同
+类别。同一对象涉及多项 Event 时分别列出，并各用该 Event 内的本批原文作证。优先沿用既有实体的实际
+名称；“你、我、主角”等不是人物姓名。没有实际姓名时使用稳定、可区分的未具名身份，不虚构姓名。
 
 【输出字段】
 只输出一个合法 JSON 对象，不输出解释或代码围栏。顶层只有 events；events 是非空数组，按前文与
@@ -83,7 +165,7 @@ events 每项只有：
 - entity_roster：数组，可为空。
 
 entity_roster 每项只有：
-- type：character、location、item、organization 四者之一；
+- type：character、location、item、organization、skill、concept 六者之一；
 - primary_name：主要名称；
 - aliases：本批有原文依据且确认同一对象的别称；没有则用空数组；
 - evidence_quote：该对象符合对应 Type 条件的逐字原文短引。
@@ -132,33 +214,41 @@ story_summary_add 仍只写本段新增内容。
 """.strip()
 
 
-ENTITY_FACT_SYSTEM_PROMPT = """
-Event 边界已经锁定，不要重判、移动、合并或拆分 Event。每个 fixed_event_segment 内的
-entity_roster 已由脚本标明 create 或 update。只提取 Entity 自身新增或发生变化的事实；本任务不判断
-关系、位置引用或 Event 参与方式。名录不是封闭白名单，正文中漏掉的 Character、Location、Item、
-Organization、Skill 或 Concept 仍可补充。新建对象填写主要名称、简短稳定说明和来源；更新既有对象
-沿用输入中的 entity_key，只返回本批确有变化的事实，不重发未变化资料。
+ENTITY_CREATE_SYSTEM_PROMPT = """
+Event 边界和新增 Entity 目录已经锁定。本任务只为目录中 record_action=create 的对象建立第一版资料；
+不要重判 Event，不把对象改成 update，也不填写位置、父级、物品放置、Relation、正式 ID、Index、
+Event 或 Memory。不要补建目录以外的对象，也不能凭背景设定虚构对象。
 
-facts_patch 是开放事实对象：使用简短清楚的字段名，按原文需要填写文字、数字、布尔值、数组或嵌套
-对象，不要求套入固定资料模板。正式名称和别名仍使用专门字段；当前位置、父级、物品放置、相关概念、
-关系端点、正式 ID、反向索引、Event 和 Memory 不放进 facts_patch。不能确定结构关系时，只保留事实
-文字，不编造引用。
+每个新对象填写实际主要名称、别名、稳定的一句 Description、原文依据和 semantic_fields。
+semantic_fields 的键使用该 Type 的开放语义 Component 名称；每个值是开放 JSON 对象，可以按事实自然
+填写文字、数字、布尔值、数组或嵌套对象，不要求补齐模板：
+- character：character_profile、character_behavior_profile、character_state、character_objective
+- location：location_profile、environment_profile、location_atmosphere、location_state
+- item：item_profile、item_characteristic
+- organization：organization_profile、organization_structure、organization_culture、organization_strategy、organization_objective、organization_state
+- skill：skill_definition、skill_characteristic
+- concept：concept_definition、applicability
 
 只输出 JSON，不解释：
-{
-  "entities": [{
-    "entity_key": "character/location/item/organization/skill/concept:主要名称",
-    "type": "character | location | item | organization | skill | concept",
-    "primary_name": "新建时必填；更新时省略",
-    "aliases_add": ["本批确认属于同一对象的新称呼"],
-    "description": "新建时填写稳定的一句说明；确有变化时返回完整替换稿",
-    "evidence": [{
-      "source_ref": "本批来源书签",
-      "quote": "支持该对象或本次更新的逐字原文短引"
-    }],
-    "facts_patch": {}
-  }]
-}
+{"entities":[{"entity_key":"type:主要名称","type":"character | location | item | organization | skill | concept","primary_name":"实际名称","aliases_add":[],"description":"稳定短说明","evidence":[{"source_ref":"本批来源书签","quote":"逐字原文短引"}],"semantic_fields":{"正式 Component 名称":{}}}]}
+""".strip()
+
+
+ENTITY_UPDATE_SYSTEM_PROMPT = """
+Event 边界和既有 Entity 目录已经锁定。本任务只更新 record_action=update 的对象。输入中的 existing_entity
+是当前资料；没有新事实时不返回该对象。不要重写整个 Entity，不填写位置、父级、物品放置、Relation、
+正式 ID、Index、Event 或 Memory。
+
+每次只返回发生变化的开放语义字段。模型只判断新证据与该字段旧内容的关系：
+- supplement：旧内容仍然成立，新内容只是补充；value 只写新增或扩展部分。
+- revise：新证据使旧字段不再完整或不再准确；value 写该字段修订后的完整当前内容。
+
+判断依据是事实含义，不是字数多少。字段原本不存在时直接返回 supplement，脚本会按新增字段处理。
+遗漏字段不表示删除；拿不准是否改变时不覆盖旧值。semantic_fields 的正式名称与开放内容范围和新增任务
+相同。Description 只有核心辨识信息确实改变时才返回 description_update 完整新稿。
+
+只输出 JSON，不解释：
+{"entities":[{"entity_key":"沿用输入键","aliases_add":[],"description_update":"可省略","field_updates":[{"field_name":"正式 Component 名称","relationship_to_old":"supplement | revise","value":{},"evidence":[{"source_ref":"本批来源书签","quote":"逐字原文短引"}]}]}]}
 """.strip()
 
 
@@ -170,9 +260,9 @@ Event 的实际发生地点单独填写 event_locations。被提到、计划前�
 确认实际地点时可以为空。其他 Entity 与 Event 的普通关联由脚本根据实体证据建立，不在这里重复判断。
 
 reference_updates 只填写正文明确支持的当前地点、直接父级、物品当前放置和长期相关 Concept。目标必须
-能在既有对象或本批名录中定位；不确定时省略。Character Relation 连接两个 Character：新关系写清双方
-关系事实，既有关系只在事实变化时更新。自然语言事实放在 description、facts_patch 或 directional_views，
-不要求把它们硬分成大量类别。不要生成正式 ID、反向索引、Event 内容或 Memory。
+能在既有对象或本批名录中定位；不确定时省略。Character Relation 连接两个 Character：双方共有的关系
+事实集中写入 description，单方向的当前态度或做法写入 directional_views；不要求再分大量类别。既有关系
+只在事实变化时更新。不要生成正式 ID、反向索引、Event 内容或 Memory。
 
 只输出 JSON，不解释：
 {
@@ -195,7 +285,6 @@ reference_updates 只填写正文明确支持的当前地点、直接父级、�
     "participant_keys": ["character:甲", "character:乙"],
     "description": "新关系的完整简述或既有关系的更新稿",
     "evidence": [{"source_ref": "本批来源书签", "quote": "关系依据的逐字原文短引"}],
-    "facts_patch": {},
     "directional_views": [{
       "from_key": "character:甲",
       "toward_key": "character:乙",
@@ -489,23 +578,75 @@ def _name_signature(value: Any) -> str:
     return re.sub(r"[\s·・,，。．、:：;；]+", "", str(value)).casefold()
 
 
+def _field_signature(value: Any) -> str:
+    """折叠字段名的大小写和常见分隔符，供高置信纠错使用。"""
+
+    return re.sub(r"[\s_\-./\\:：]+", "", str(value)).casefold()
+
+
+def canonical_semantic_component_name(
+    entity_type: str, proposed_name: Any
+) -> tuple[str | None, str]:
+    """把模型字段名映射到该 Type 的开放 Component。
+
+    返回 ``(正式名称, 原因)``。只有显式别名、折叠后精确命中或明显唯一的
+    拼写误差才自动修正；其余内容交给维护收件箱，避免猜错字段后污染召回。
+    """
+
+    proposed = str(proposed_name).strip()
+    allowed = OPEN_SEMANTIC_COMPONENTS.get(entity_type, ())
+    if not proposed or not allowed:
+        return None, "empty_or_unsupported_type"
+    if proposed in allowed:
+        return proposed, "exact"
+
+    signature = _field_signature(proposed)
+    exact_matches = [name for name in allowed if _field_signature(name) == signature]
+    if len(exact_matches) == 1:
+        return exact_matches[0], "normalized_exact"
+
+    alias_targets = SEMANTIC_COMPONENT_ALIASES.get(proposed.casefold()) or {}
+    alias = alias_targets.get(entity_type)
+    if alias in allowed:
+        return alias, "registered_alias"
+
+    scores = sorted(
+        (
+            SequenceMatcher(None, signature, _field_signature(name)).ratio(),
+            name,
+        )
+        for name in allowed
+    )
+    best_score, best_name = scores[-1]
+    second_score = scores[-2][0] if len(scores) > 1 else 0.0
+    if best_score >= 0.92 and best_score - second_score >= 0.05:
+        return best_name, "unique_typo_repair"
+    return None, "unclassified"
+
+
+def open_semantic_component_catalog() -> dict[str, list[str]]:
+    """返回可注入提示词或前端的 Type—开放 Component 目录。"""
+
+    return {
+        entity_type: list(component_names)
+        for entity_type, component_names in OPEN_SEMANTIC_COMPONENTS.items()
+    }
+
+
 def _canonical_roster_identity(
     *,
     state: dict[str, Any],
     entity_type: str,
     name: str,
     aliases: list[str],
-) -> tuple[str, str, list[str], dict[str, Any] | None]:
+) -> tuple[str, str, list[str], dict[str, Any] | None, str]:
     candidates = state.get("entity_candidates", {})
     direct_key = f"{entity_type}:{name}"
-    if isinstance(candidates.get(direct_key), dict):
-        existing = candidates[direct_key]
-        return direct_key, str(existing.get("primary_name", name)), aliases, existing
-
     signatures = {_name_signature(name), *(_name_signature(alias) for alias in aliases)}
     matches: list[tuple[str, dict[str, Any]]] = []
+    cross_type_matches: list[str] = []
     for key, candidate in candidates.items():
-        if not isinstance(candidate, dict) or candidate.get("type") != entity_type:
+        if not isinstance(candidate, dict):
             continue
         known = {
             _name_signature(candidate.get("primary_name", "")),
@@ -515,15 +656,22 @@ def _canonical_roster_identity(
             ),
         }
         if any(signature and signature in known for signature in signatures):
-            matches.append((str(key), candidate))
-    if len(matches) != 1:
-        return direct_key, name, aliases, None
+            if candidate.get("type") == entity_type:
+                matches.append((str(key), candidate))
+            else:
+                cross_type_matches.append(str(key))
+    if cross_type_matches:
+        return direct_key, name, aliases, None, "unresolved"
+    if len(matches) == 0:
+        return direct_key, name, aliases, None, "create"
+    if len(matches) > 1:
+        return direct_key, name, aliases, None, "unresolved"
     key, existing = matches[0]
     canonical_name = str(existing.get("primary_name", name))
     merged_aliases = _unique(
         [*aliases, *(value for value in (name,) if value != canonical_name)]
     )
-    return key, canonical_name, merged_aliases, existing
+    return key, canonical_name, merged_aliases, existing, "update"
 
 
 def normalize_narrative_map(
@@ -640,19 +788,24 @@ def normalize_narrative_map(
                 for alias in _as_list(raw_entity.get("aliases"))
                 if str(alias).strip() and str(alias).strip() != name
             )
-            key, canonical_name, aliases, existing = _canonical_roster_identity(
+            key, canonical_name, aliases, existing, record_action = _canonical_roster_identity(
                 state=state,
                 entity_type=entity_type,
                 name=name,
                 aliases=aliases,
             )
+            if record_action == "unresolved":
+                warnings.append(
+                    f"{entity_type}:{name} 与多个既有身份或其他 Type 冲突；"
+                    "脚本已保留为待确认目录项，不自动新增或更新"
+                )
             roster_candidates.append(
                 {
                     "entity_key": key,
                     "type": entity_type,
                     "primary_name": canonical_name,
                     "aliases": aliases,
-                    "record_action": "update" if existing is not None else "create",
+                    "record_action": record_action,
                     **(
                         {
                             "existing_entity": {
@@ -660,6 +813,11 @@ def normalize_narrative_map(
                                 "primary_name": canonical_name,
                                 "aliases": deepcopy(_as_list(existing.get("aliases"))),
                                 "description": str(existing.get("description", "")),
+                                "semantic_fields": deepcopy(
+                                    existing.get("semantic_fields", {})
+                                    if isinstance(existing.get("semantic_fields"), dict)
+                                    else {}
+                                ),
                             }
                         }
                         if existing is not None
@@ -979,20 +1137,79 @@ def build_event_content_user_prompt(
     )
 
 
-def build_entity_content_user_prompt(
+def split_entity_workloads(
+    fixed_segments: Iterable[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """按脚本解析结果拆出新增、更新和待确认目录。
+
+    每个模型任务仍按批次处理，不为每个 Entity 单独调用。分段正文保持原样，
+    只过滤目录项；这样新增与更新任务都能看到支持自身候选的完整上下文。
+    """
+
+    workloads: dict[str, list[dict[str, Any]]] = {
+        "create": [],
+        "update": [],
+        "unresolved": [],
+    }
+    for segment in fixed_segments:
+        if not isinstance(segment, dict):
+            continue
+        rosters: dict[str, list[dict[str, Any]]] = {
+            action: [] for action in workloads
+        }
+        for roster in _as_list(segment.get("entity_roster")):
+            if not isinstance(roster, dict):
+                continue
+            action = str(roster.get("record_action", "")).strip()
+            if action not in ENTITY_RECORD_ACTIONS:
+                action = "unresolved"
+            rosters[action].append(deepcopy(roster))
+        for action, items in rosters.items():
+            if not items:
+                continue
+            workloads[action].append(
+                {
+                    **{
+                        key: deepcopy(value)
+                        for key, value in segment.items()
+                        if key != "entity_roster"
+                    },
+                    "entity_roster": items,
+                }
+            )
+    return workloads
+
+
+def build_entity_create_user_prompt(
     *,
     batch_number: int,
     fixed_segments: list[dict[str, Any]],
-    existing_entity_previews: dict[str, Any],
 ) -> str:
     payload = {
         "batch_number": batch_number,
         "fixed_event_segments": fixed_segments,
-        "existing_entity_candidates": existing_entity_previews,
+        "open_semantic_component_catalog": open_semantic_component_catalog(),
     }
     import json
 
-    return "请核对候选名录，只提取本批 Entity 自身的新建或更新信息。\n" + json.dumps(
+    return "请只建立脚本已判定为新增的 Entity。\n" + json.dumps(
+        payload, ensure_ascii=False, indent=2
+    )
+
+
+def build_entity_update_user_prompt(
+    *,
+    batch_number: int,
+    fixed_segments: list[dict[str, Any]],
+) -> str:
+    payload = {
+        "batch_number": batch_number,
+        "fixed_event_segments": fixed_segments,
+        "open_semantic_component_catalog": open_semantic_component_catalog(),
+    }
+    import json
+
+    return "请只为脚本已匹配的既有 Entity 返回字段级更新。\n" + json.dumps(
         payload, ensure_ascii=False, indent=2
     )
 
@@ -1037,6 +1254,8 @@ def merge_roster_fallbacks(
         "location": "地点",
         "item": "物品",
         "organization": "组织",
+        "skill": "技能",
+        "concept": "概念",
     }
     roster_items = [
         roster_item
@@ -1047,6 +1266,8 @@ def merge_roster_fallbacks(
     ]
     for roster_item in roster_items:
         if not isinstance(roster_item, dict):
+            continue
+        if roster_item.get("record_action") == "unresolved":
             continue
         key = str(roster_item.get("entity_key", "")).strip()
         entity_type = str(roster_item.get("type", "")).strip()

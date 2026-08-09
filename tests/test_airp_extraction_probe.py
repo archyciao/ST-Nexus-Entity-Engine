@@ -1722,6 +1722,20 @@ class AirpExtractionProbeTests(unittest.TestCase):
         self.assertNotIn("think", body)
         self.assertNotIn("enable_thinking", body)
 
+    def test_high_mode_uses_enabled_thinking_and_high_effort(self) -> None:
+        body = PROBE.chat_completion_request_body(
+            "deepseek-v4-flash-free",
+            "system",
+            "user",
+            32768,
+            thinking_mode="high",
+            response_format="text",
+        )
+
+        self.assertEqual({"type": "enabled"}, body["thinking"])
+        self.assertEqual("high", body["reasoning_effort"])
+        self.assertNotIn("temperature", body)
+
     def test_gold_scope_must_match_requested_round_range(self) -> None:
         gold = {"source": {"round_end": 16}}
         PROBE.validate_gold_scope(gold, batch_size=4, batch_count=4)

@@ -65,6 +65,8 @@ LOCAL_ID_KINDS: Final[frozenset[str]] = frozenset(
         "concept_stage",
         "concept_stage_context",
         "event_detail",
+        "field_update",
+        "field_revision",
     }
 )
 """当前允许由系统生成的 Component 局部标识类型。"""

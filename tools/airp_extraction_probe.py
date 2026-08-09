@@ -3732,6 +3732,34 @@ def _deep_open_patch(existing: Any, patch: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _supplement_open_value(existing: Any, addition: Any) -> Any:
+    """保留既有事实并吸收补充内容；遇到不同标量时两者并存而不猜覆盖。"""
+
+    if existing is None:
+        return deepcopy(addition)
+    if addition is None or existing == addition:
+        return deepcopy(existing)
+    if isinstance(existing, dict) and isinstance(addition, dict):
+        result = deepcopy(existing)
+        for field, value in addition.items():
+            result[field] = _supplement_open_value(result.get(field), value)
+        return result
+    if isinstance(existing, list):
+        additions = addition if isinstance(addition, list) else [addition]
+        result = deepcopy(existing)
+        for value in additions:
+            if value not in result:
+                result.append(deepcopy(value))
+        return result
+    if isinstance(addition, list):
+        result = [deepcopy(existing)]
+        for value in addition:
+            if value not in result:
+                result.append(deepcopy(value))
+        return result
+    return [deepcopy(existing), deepcopy(addition)]
+
+
 def _merge_patch_array(field: str, existing: Any, patch: list[Any]) -> list[Any]:
     """只对有稳定语义身份的数组做增量合并；其他数组仍是完整替换。"""
 
@@ -4106,6 +4134,56 @@ def apply_entity_candidates(
         )
         if isinstance(candidate.get("facts_patch"), dict):
             merged["facts"] = _deep_open_patch(old.get("facts"), candidate["facts_patch"])
+        semantic_fields = deepcopy(old.get("semantic_fields", {}))
+        if not isinstance(semantic_fields, dict):
+            semantic_fields = {}
+        revision_history = [
+            deepcopy(item)
+            for item in _as_list(old.get("semantic_field_revisions"))
+            if isinstance(item, dict)
+        ]
+        for update in _as_list(candidate.get("semantic_field_updates")):
+            if not isinstance(update, dict):
+                continue
+            field_name = str(update.get("field_name", "")).strip()
+            relationship = str(update.get("relationship_to_old", "")).strip()
+            value = update.get("value")
+            if not field_name or relationship not in {"supplement", "revise"}:
+                continue
+            if relationship == "revise" and field_name in semantic_fields:
+                revision_history.append(
+                    {
+                        "field_name": field_name,
+                        "previous_value": deepcopy(semantic_fields[field_name]),
+                        "replaced_by_evidence_refs": deepcopy(
+                            _as_list(update.get("evidence_refs"))
+                        ),
+                    }
+                )
+                semantic_fields[field_name] = deepcopy(value)
+            elif relationship == "revise":
+                semantic_fields[field_name] = deepcopy(value)
+            else:
+                semantic_fields[field_name] = _supplement_open_value(
+                    semantic_fields.get(field_name), value
+                )
+        if semantic_fields:
+            merged["semantic_fields"] = semantic_fields
+        if revision_history:
+            merged["semantic_field_revisions"] = revision_history
+        merged["unclassified_field_updates"] = _merge_keyed_list(
+            _as_list(old.get("unclassified_field_updates")),
+            [
+                deepcopy(item)
+                for item in _as_list(candidate.get("unclassified_field_updates"))
+                if isinstance(item, dict)
+            ],
+            lambda item: (
+                item.get("proposed_field_name"),
+                item.get("reason"),
+                json.dumps(item.get("value"), ensure_ascii=False, sort_keys=True),
+            ),
+        )
         if isinstance(candidate.get("character_data_patch"), dict):
             merged["character_data"] = _deep_patch(
                 old.get("character_data"), candidate["character_data_patch"]
@@ -5351,6 +5429,67 @@ def materialize_network(state: dict[str, Any]) -> tuple[list[dict[str, Any]], di
                     state, candidate_key, candidate, placement_hints
                 )
             )
+        semantic_fields = candidate.get("semantic_fields")
+        if isinstance(semantic_fields, dict):
+            for component_name, value in semantic_fields.items():
+                if not isinstance(value, dict) or not value:
+                    continue
+                existing_data = (
+                    components.get(component_name, {}).get("data", {})
+                    if isinstance(components.get(component_name), dict)
+                    else {}
+                )
+                components[component_name] = _envelope(
+                    _deep_open_patch(existing_data, value), version="0.2.0"
+                )
+        unclassified = [
+            item
+            for item in _as_list(candidate.get("unclassified_field_updates"))
+            if isinstance(item, dict)
+        ]
+        revisions = [
+            item
+            for item in _as_list(candidate.get("semantic_field_revisions"))
+            if isinstance(item, dict)
+        ]
+        if unclassified or revisions:
+            maintenance_data: dict[str, Any] = {}
+            if unclassified:
+                maintenance_data["unclassified_updates"] = [
+                    {
+                        "update_id": _mapped_local_id(
+                            state,
+                            f"{candidate_key}:{index}:{json.dumps(item, ensure_ascii=False, sort_keys=True)}",
+                            "field_update",
+                        ),
+                        "proposed_field_name": str(
+                            item.get("proposed_field_name", "")
+                        ).strip(),
+                        "value": deepcopy(item.get("value")),
+                        "reason": str(item.get("reason", "unclassified")),
+                        "evidence_refs": deepcopy(
+                            _as_list(item.get("evidence_refs"))
+                        ),
+                    }
+                    for index, item in enumerate(unclassified)
+                ]
+            if revisions:
+                maintenance_data["revision_history"] = [
+                    {
+                        "revision_id": _mapped_local_id(
+                            state,
+                            f"{candidate_key}:{index}:{json.dumps(item, ensure_ascii=False, sort_keys=True)}",
+                            "field_revision",
+                        ),
+                        "field_name": str(item.get("field_name", "")),
+                        "previous_value": deepcopy(item.get("previous_value")),
+                        "replaced_by_evidence_refs": deepcopy(
+                            _as_list(item.get("replaced_by_evidence_refs"))
+                        ),
+                    }
+                    for index, item in enumerate(revisions)
+                ]
+            components["entity_field_maintenance"] = _envelope(maintenance_data)
         entities.append(
             {
                 "id": _mapped_id(state, "entity", candidate_key, entity_type),
