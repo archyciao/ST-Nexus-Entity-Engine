@@ -1,72 +1,70 @@
-# ST-Nexus-Entity-Engine
+# NexusEntityEngine
 
-The Entity, Event, Memory and Relation data foundation for long-form SillyTavern AIRP. This repository contains both the NexusEntityEngine core and its Tavern plugin: the frontend lives at the repository root, while `server/` connects the workbench to per-chat SQLite storage and the shared Schema, Registry, validators and Event V2 extractor.
+中文 | [English](README_EN.md)
 
-The authoritative design documents are maintained in Obsidian; this repository holds the implementation and maintenance notes.
+## 这是什么
 
-## Current Principles
+NexusEntityEngine 是面向 **SillyTavern（酒馆）长篇角色扮演与故事创作**的世界资料与记忆管理插件。
 
-- Identity, ID, Type, references, Relations, actual locations, current location, parent, item placement and the reverse Index use strict structures.
-- Objective material goes into named, open semantic Components such as `character_behavior_profile`, `location_atmosphere` and `item_characteristic`. Models fill supported facts without completing a fixed profile template.
-- `entity_facts` remains for legacy compatibility. Candidates that cannot be classified safely go into maintenance-only `entity_field_maintenance`, excluded from ordinary recall.
-- An Event's `event_content` holds its three-stage state, story summary and a few key utterances/actions; the Entity Core holds a short Description.
-- Events link Characters, Locations, Items, Organizations, Skills, Concepts and Character Relations through ordinary references. Actual locations are stored separately.
-- Memory references its Owner and source Event. Hearing, reading or inferring an event does not make the Owner an event participant. Independent Memory extraction is not yet connected to the workbench.
-- Scripts rebuild the Index from authoritative references; models do not maintain the reverse catalog.
-- Raw source messages, evidence, runtime prompts and original replies belong to maintenance and run records, outside ordinary Event recall.
+它将聊天中的事件、人物、地点和关系整理成相互关联、可以查阅和修改的资料，为故事的长期连续性提供基础。目前已实现手动提取与资料管理，正在向完整的长期记忆系统发展。
 
-## Event V2
+## 功能与特色
 
-1. The model reads preceding context and consecutive AI messages, then returns coarse Event boundaries and entity rosters.
-2. Scripts validate the boundaries and lock gapless, non-overlapping source segments.
-3. Roster entries resolve to new, existing or unresolved identities. Unresolved entries are not silently created, and downstream tasks cannot bypass the roster.
-4. Once segments are fixed, tasks generate Event content, new Entity material, existing Entity updates, Relations and strict references.
-5. Updates preserve unspecified fields and revision history. Field names resolve only through registered names, deterministic formatting normalization and registered aliases; spelling similarity does not select a field.
-6. Scripts preserve stable IDs and prior state, verify complete evidence quotes against source text, rebuild references and validate the closed entity network.
-7. Formal records, reference projections, engine state and processed-range receipts commit together. Source or record changes detected before commit stop the write.
+- **从聊天整理事件**：选择聊天楼层，提取事件摘要及相关人物、地点、物品、组织、能力和概念。
+- **关联式资料库**：浏览事件与世界资料之间的联系，查看人物关系，并手动编辑资料。
+- **按聊天独立保存**：资料保存在本地，不同聊天分别管理；更新资料时保留未修改的人工字段。
+- **多模型配置**：支持 Chat Completions、Responses、Anthropic Messages 和 Gemini GenerateContent 协议，不同提取任务可使用不同模型预设。
+- **可恢复的提取流程**：支持进度查看、取消和失败重试，复用已完成步骤，减少重复处理；保存前检查来源和资料是否发生变化。
+- **酒馆内工作台**：集中查看故事与世界资料，浮动入口可以拖动并记住位置。
 
-Production execution lives in `src/world_simulator_schema/extraction/`; `src/world_simulator_schema/event_extraction_v2.py` defines the current Event V2 contract and prompts. The original probe scripts in `tools/` remain compatible entry points.
+## 如何安装
 
-## Workbench and Reliability
+当前为 **Alpha 源码安装版**，需要同时配置前端扩展和服务端插件。以下步骤面向 Windows 本地部署，以 SillyTavern 1.19.0 为参考；其他环境尚未完成安装验收。
 
-- Story navigation contains History, Events and Memories. Relations belong to World Data and can expose additional registered relation types.
-- The floating entry is draggable and remembers its position. Clicking toggles the workbench; there is no separate minimize mode.
-- Records open in a reading view, with editing explicit. Formal incoming and outgoing references are queried and paginated by the server.
-- Each extraction task can use a different model preset. Explicit adapters cover Chat Completions, Responses, Anthropic Messages and Gemini GenerateContent; model names do not determine request parameters.
-- Validated task caches and completed sub-batch checkpoints support recovery. Processed-range receipts prevent duplicate submissions and retain gaps in coverage.
-- Commits protect existing manual fields and reject concurrent record changes. Message-version checks depend on Tavern event notifications.
-- Truncated, refused, incomplete or ambiguous output is not treated as a successful extraction. Authentication and parameter errors are not automatically retried; transient failures have bounded retries and request timeouts.
+### 1. 准备环境
 
-History compression, independent Memory extraction, automatic triggering and workbench recall remain future work. The five-module extraction baseline is retained; a proposed two-task replacement has not been enabled. Source-change migration and full conflict-aware record merging also remain incomplete.
+安装 Git、Python 3.11+、Node.js 22.13+，并确保 `curl` 命令可用。运行酒馆的 Node.js 也需满足版本要求，插件使用其内置 [SQLite 支持](https://nodejs.org/download/release/v22.13.0/docs/api/sqlite.html)。
 
-Protocol adapters and recovery behavior have been validated with fixed offline fixtures, not live model requests. These checks do not establish real-model accuracy, latency, cost or compatibility with every proxy endpoint.
+关闭酒馆，在 **SillyTavern 根目录**打开 PowerShell。下面使用默认用户目录 `data/default-user`；如果使用其他用户或数据目录，请替换对应路径。扩展文件夹名称请保留为 `NexusEntityEngine`。
 
-## Directory
-
-- `index.js`, `style.css`, `manifest.json`, `assets/`, `ui/`: Tavern frontend extension and workbench.
-- `server/`: Tavern host integration, per-chat SQLite storage and batch job processes.
-- `schemas/`: versioned JSON Schemas.
-- `registry/`: Component hosts, permissions, authority and versions.
-- `src/`: IDs, validation, reference projections, extraction runtime and recall foundations.
-- `tools/`: plugin bridges, diagnostic commands and compatible probe entry points.
-- `examples/`: valid, repairable and closed-network fixtures.
-- `tests/`: Python regression tests; Node tests also live beside server and UI modules.
-- `docs/`: maintenance notes and Chinese templates not involved in runtime.
-
-## Development and Offline Checks
-
-On Windows:
+### 2. 下载插件并准备依赖
 
 ```powershell
-.\nexus.cmd setup
-$env:NEXUS_EXTRACTION_OFFLINE = '1'
-.\nexus.cmd test
-.\nexus.cmd check-registry
-node --test server/storage.test.mjs server/batch.test.mjs ui/presentation.test.mjs
+git clone https://github.com/archyciao/ST-Nexus-Entity-Engine.git .\data\default-user\extensions\NexusEntityEngine
+.\data\default-user\extensions\NexusEntityEngine\nexus.cmd setup
 ```
 
-On macOS/Linux, use `sh ./nexus.sh` with the same commands and export `NEXUS_EXTRACTION_OFFLINE=1` before testing. The launcher creates or rebuilds the local `.venv`, using the lockfile with `uv` when available or Python 3.11+ and pip otherwise. The virtual environment is not distributed with the repository.
+### 3. 连接并启用服务端插件
 
-The current offline suite passes 195 Python tests and 20 Node tests. Production model transport refuses network requests when `NEXUS_EXTRACTION_OFFLINE=1`; integration fixtures substitute fixed responses.
+仍在 SillyTavern 根目录执行：
 
-Keep API credentials out of source control, command arguments and reports. Do not persist hidden reasoning in run reports. Restart the Tavern service to load changes to the server plugin.
+```powershell
+New-Item -ItemType Directory -Force .\plugins | Out-Null
+New-Item -ItemType Junction -Path .\plugins\NexusEntityEngine -Target (Resolve-Path .\data\default-user\extensions\NexusEntityEngine\server).Path
+```
+
+在酒馆 `config.yaml` 中，将已有的 `enableServerPlugins` 设置为 `true`：
+
+```yaml
+enableServerPlugins: true
+```
+
+服务端插件在酒馆启动时加载，配置说明见 [SillyTavern 官方文档](https://docs.sillytavern.app/for-contributors/server-plugins/)。
+
+### 4. 启动并配置模型
+
+启动酒馆并刷新页面，确认扩展已启用。点击 NexusEntityEngine 浮动图标，在“模型连接”中填写 API 地址、密钥和模型，选择对应协议；随后打开聊天，在“批量提取”中选择处理范围。
+
+当前安装需要访问酒馆所在电脑的文件和配置，仅在扩展面板安装前端不足以运行。
+
+## 开发阶段与后续计划
+
+**当前阶段：Alpha，已具备手动提取、资料管理和基础恢复能力。** 当前插件界面以中文为主，验证以本地界面和离线样例为主；真实模型效果与长聊天稳定性仍需持续验证。
+
+后续重点：
+
+- **提取准确性与效率**：改进遗漏对象发现、候选结果复核、字段冲突处理和多模型适配。
+- **分层历史**：将事件逐步压缩成不同层级的故事总结。目前历史页面仅为功能入口。
+- **独立记忆与自动召回**：区分角色所知与客观事实，将相关记忆带回后续对话；当前尚未接通。
+- **资料变更管理**：完善聊天修改后的影响追踪、资料迁移与安全合并。
+- **自动化与安装体验**：自动触发、共享限流与预算控制，以及更简单的安装和跨平台支持。
