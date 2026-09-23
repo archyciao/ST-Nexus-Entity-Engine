@@ -9,7 +9,6 @@ V2 第一次按完整局部故事直接返回短窗口内的 Event 起点和各 
 from __future__ import annotations
 
 from copy import deepcopy
-from difflib import SequenceMatcher
 import re
 import unicodedata
 from typing import Any, Iterable
@@ -589,8 +588,8 @@ def canonical_semantic_component_name(
 ) -> tuple[str | None, str]:
     """把模型字段名映射到该 Type 的开放 Component。
 
-    返回 ``(正式名称, 原因)``。只有显式别名、折叠后精确命中或明显唯一的
-    拼写误差才自动修正；其余内容交给维护收件箱，避免猜错字段后污染召回。
+    返回 ``(正式名称, 原因)``。只接受显式别名或折叠后精确命中；
+    拼写相似不代表语义相同，其余内容交给维护收件箱。
     """
 
     proposed = str(proposed_name).strip()
@@ -610,17 +609,6 @@ def canonical_semantic_component_name(
     if alias in allowed:
         return alias, "registered_alias"
 
-    scores = sorted(
-        (
-            SequenceMatcher(None, signature, _field_signature(name)).ratio(),
-            name,
-        )
-        for name in allowed
-    )
-    best_score, best_name = scores[-1]
-    second_score = scores[-2][0] if len(scores) > 1 else 0.0
-    if best_score >= 0.92 and best_score - second_score >= 0.05:
-        return best_name, "unique_typo_repair"
     return None, "unclassified"
 
 
@@ -644,7 +632,6 @@ def _canonical_roster_identity(
     direct_key = f"{entity_type}:{name}"
     signatures = {_name_signature(name), *(_name_signature(alias) for alias in aliases)}
     matches: list[tuple[str, dict[str, Any]]] = []
-    cross_type_matches: list[str] = []
     for key, candidate in candidates.items():
         if not isinstance(candidate, dict):
             continue
@@ -658,10 +645,6 @@ def _canonical_roster_identity(
         if any(signature and signature in known for signature in signatures):
             if candidate.get("type") == entity_type:
                 matches.append((str(key), candidate))
-            else:
-                cross_type_matches.append(str(key))
-    if cross_type_matches:
-        return direct_key, name, aliases, None, "unresolved"
     if len(matches) == 0:
         return direct_key, name, aliases, None, "create"
     if len(matches) > 1:
@@ -780,7 +763,7 @@ def normalize_narrative_map(
             evidence_location = _locate_quote(sources, evidence) if evidence else None
             if evidence_location is None:
                 warnings.append(
-                    f"{entity_type}:{name} 的名录证据无法核对，已交给第二阶段重新发现"
+                    f"{entity_type}:{name} 的名录证据无法核对，未纳入正式名录；原回复保留待复核"
                 )
                 continue
             aliases = _unique(
@@ -796,7 +779,7 @@ def normalize_narrative_map(
             )
             if record_action == "unresolved":
                 warnings.append(
-                    f"{entity_type}:{name} 与多个既有身份或其他 Type 冲突；"
+                    f"{entity_type}:{name} 与同 Type 的多个既有身份冲突；"
                     "脚本已保留为待确认目录项，不自动新增或更新"
                 )
             roster_candidates.append(
@@ -1237,7 +1220,7 @@ def merge_roster_fallbacks(
 ) -> dict[str, Any]:
     """把第一阶段已确认且有原文证据的名录项补成最小 Entity 候选。
 
-    第二阶段仍负责丰富内容和发现遗漏；脚本只复用名称、Type、别称与证据，不
+    当前第二阶段只丰富已解析名录；此兜底只复用名称、Type、别称与证据，不
     猜外貌、背景、所有权等资料。
     """
 

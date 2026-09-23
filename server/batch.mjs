@@ -1,167 +1,136 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
-import { enginePaths } from './engine.mjs';
+import { spawn, execFile } from 'node:child_process';
+import { enginePaths, callEngine } from './engine.mjs';
+import { sourceVersionInput } from '../ui/source-version.js';
 
 const running = new Map();
-
-function endpointFor(preset) {
-    const url = String(preset.baseUrl || '').replace(/\/$/, '');
-    if (/\/chat\/completions$/i.test(url)) return url;
-    if (/\/v1$/i.test(url)) return `${url}/chat/completions`;
-    return `${url}/v1/chat/completions`;
-}
+const TASKS = ['narrative_map', 'event_content', 'entity_create', 'entity_update', 'relation_references'];
+const LABELS = { narrative_map: '识别事件与对象', event_content: '整理事件', entity_create: '建立资料', entity_update: '更新资料', relation_references: '连接关系与地点' };
+const digest = value => crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function pythonExecutable() {
-    const configured = String(process.env.NEXUS_ENTITY_ENGINE_PYTHON || '').trim();
-    if (configured) return configured;
-    const bundled = path.join(enginePaths.projectRoot, '.venv', 'Scripts', 'python.exe');
-    return fs.existsSync(bundled) ? bundled : 'python';
-}
-
-function thinkingValue(preset) { return preset.reasoningEffort === 'none' ? 'off' : preset.reasoningEffort; }
-
-function normalizedMessages(messages = [], startFloor, endFloor) {
-    return messages.slice(startFloor, endFloor + 1).map((message, index) => ({
-        name: String(message?.name || (message?.is_user ? 'user' : 'assistant')),
-        is_user: Boolean(message?.is_user),
-        mes: String(message?.mes || ''),
-        send_date: message?.send_date || '',
-        extra: { ...(message?.extra || {}), nexus_source_floor: startFloor + index },
-    })).filter(message => message.mes.trim());
-}
-
-function entityClosure(entities, selectedTypes) {
-    const byId = new Map(entities.filter(item => item?.id).map(item => [item.id, item]));
-    const selected = new Set(entities.filter(item => selectedTypes.has(item.type)).map(item => item.id));
-    const visit = value => {
-        if (typeof value === 'string' && byId.has(value)) selected.add(value);
-        else if (Array.isArray(value)) for (const item of value) visit(item);
-        else if (value && typeof value === 'object') for (const item of Object.values(value)) visit(item);
-    };
-    let size = -1;
-    while (size !== selected.size) {
-        size = selected.size;
-        for (const id of [...selected]) visit(byId.get(id));
+    if (process.env.NEXUS_ENTITY_ENGINE_PYTHON) return process.env.NEXUS_ENTITY_ENGINE_PYTHON;
+    for (const suffix of [['.venv', 'Scripts', 'python.exe'], ['.venv', 'bin', 'python']]) {
+        const file = path.join(enginePaths.projectRoot, ...suffix);
+        if (fs.existsSync(file)) return file;
     }
-    return [...selected].map(id => byId.get(id)).filter(Boolean);
+    return process.platform === 'win32' ? 'python' : 'python3';
 }
 
-function appendLog(store, chatId, jobId, line) {
-    const current = store.getBatchJob(chatId, jobId);
-    if (!current) return;
-    const logs = [...(current.logs || []), String(line).trim()].filter(Boolean).slice(-120);
-    let progress = Number(current.progress || 1);
-    if (line.includes('Narrative Map')) progress = Math.max(progress, line.includes('已返回') ? 24 : 8);
-    if (line.includes('Event Content') || line.includes('Entity Create') || line.includes('Entity Update') || line.includes('Relation')) progress = Math.max(progress, 52);
-    if (line.includes('固定脚本') || line.includes('校验')) progress = Math.max(progress, 78);
-    store.updateBatchJob(chatId, jobId, { logs, progress: Math.min(progress, 92), currentStep: String(line).trim().slice(0, 200) });
-}
-
-export function startBatch({ store, chatId, job, messages, presetId = '', connectionPresetIds = {} }) {
-    if (running.has(job.id)) throw new Error('该批量任务正在运行。');
-    const primary = store.listApiPresets({ includeSecret: true }).find(item => item.isPrimary);
-    const preset = presetId
-        ? store.getApiPreset(presetId, { includeSecret: true })
-        : primary;
-    if (!preset) throw new Error('请先设置主 API，或在 Narrative Map 模块选择一个 API。');
-    if (!preset.apiKey) throw new Error('所选 API 没有保存密钥。');
-    if (!preset.model) throw new Error('所选 API 没有填写模型名称。');
-    if (preset.transport !== 'chat_completions') throw new Error('当前正式批量提取器只支持 Chat Completions 传输协议。');
-
-    const connectionPresets = {};
-    for (const [task, fallback] of Object.entries({ narrative_map: preset, event_content: primary || preset, entity_create: primary || preset, entity_update: primary || preset, relation_references: primary || preset })) {
-        const selectedId = connectionPresetIds[task] || (task === 'narrative_map' ? presetId : '');
-        const selected = selectedId ? store.getApiPreset(selectedId, { includeSecret: true }) : fallback;
-        if (!selected?.apiKey || !selected.model) throw new Error(`${task} 所选 API 缺少密钥或模型名称。`);
-        if (selected.transport !== 'chat_completions') throw new Error(`${task} 当前只支持 Chat Completions 传输协议。`);
-        connectionPresets[task] = selected;
-    }
-
-    const selected = normalizedMessages(messages, job.startFloor, job.endFloor);
-    if (!selected.some(item => item.is_user) || !selected.some(item => !item.is_user)) throw new Error('所选楼层必须至少包含一轮用户消息和 AI 回复。');
-    const paths = store.getPaths(chatId);
-    const runRoot = path.join(paths.chatDirectory, 'runs', job.id);
-    fs.mkdirSync(runRoot, { recursive: true });
-    const inputPath = path.join(runRoot, 'chat.jsonl');
-    const outputPath = path.join(runRoot, 'run.md');
-    const resultPath = path.join(runRoot, 'result.json');
-    const promptOverridePath = path.join(runRoot, 'prompt-overrides.json');
-    const workflowPath = path.join(runRoot, 'workflow.json');
-    fs.writeFileSync(inputPath, `${selected.map(item => JSON.stringify(item)).join('\n')}\n`, 'utf8');
-    fs.writeFileSync(promptOverridePath, JSON.stringify(store.getSettings().promptOverrides || {}, null, 2), 'utf8');
-    fs.writeFileSync(workflowPath, JSON.stringify(store.getSettings().extraction || {}, null, 2), 'utf8');
-    const pairedRounds = Math.max(1, Math.floor(selected.length / 2));
-    const batchSize = 4;
-    const args = [
-        path.join(enginePaths.projectRoot, 'tools', 'tavern_batch_runner.py'),
-        '--result-json', resultPath,
-        inputPath, '--endpoint', endpointFor(preset), '--model', preset.model,
-        '--output', outputPath, '--prompt-overrides', promptOverridePath, '--workflow', workflowPath, '--batch-size', String(batchSize), '--batches', String(Math.ceil(pairedRounds / batchSize)),
-        '--stage2-workers', '4', '--map-thinking', thinkingValue(connectionPresets.narrative_map),
-        '--event-thinking', thinkingValue(connectionPresets.event_content),
-        '--entity-thinking', thinkingValue(connectionPresets.entity_create),
-        '--create-thinking', thinkingValue(connectionPresets.entity_create),
-        '--update-thinking', thinkingValue(connectionPresets.entity_update),
-        '--relation-thinking', thinkingValue(connectionPresets.relation_references),
-    ];
-    const connectionGroups = {
-        map: connectionPresets.narrative_map,
-        event: connectionPresets.event_content,
-        create: connectionPresets.entity_create,
-        update: connectionPresets.entity_update,
-        relation: connectionPresets.relation_references,
-    };
-    const childEnv = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
-    for (const [prefix, selected] of Object.entries(connectionGroups)) {
-        const envName = `NEXUS_BATCH_KEY_${prefix.toUpperCase()}`;
-        childEnv[envName] = selected.apiKey;
-        args.push(`--${prefix}-endpoint`, endpointFor(selected), `--${prefix}-model`, selected.model, `--${prefix}-api-key-env`, envName);
-    }
-    const startedAt = new Date().toISOString();
-    store.updateBatchJob(chatId, job.id, { status: 'running', progress: 2, currentStep: '启动正式提取流水线', startedAt, error: '', inputPath, outputPath, logs: [] });
-    const child = spawn(pythonExecutable(), args, {
-        cwd: enginePaths.projectRoot, windowsHide: true,
-        env: { ...childEnv, OPENCODE_API_KEY: preset.apiKey },
-        stdio: ['ignore', 'pipe', 'pipe'],
+export function normalizeSources(messages = []) {
+    return messages.map((message, floor) => {
+        const mes = String(message?.mes || '');
+        const name = String(message?.name || (message?.is_user ? 'user' : 'assistant'));
+        const sourceId = String(message?.extra?.nexus_source_id || message?.extra?.message_id || `floor-${floor}`);
+        const version = digest(sourceVersionInput(message, floor));
+        return { name, is_user: Boolean(message?.is_user), is_system: Boolean(message?.is_system), mes, send_date: message?.send_date || '', extra: { nexus_source_floor: floor, nexus_source_id: sourceId, nexus_source_version: version } };
     });
-    running.set(job.id, child);
-    let stderr = '';
+}
+
+export function selectUnprocessed(all, coverage, start, end) {
+    const covered = new Set();
+    for (const receipt of coverage) for (const old of receipt.sources) {
+        const current = all[old.floor]?.extra;
+        if (!current || current.nexus_source_id !== old.id || current.nexus_source_version !== old.version) throw new Error('已处理消息被编辑、删除或切换了版本。请先复核旧资料来源；本次没有覆盖或重复导入。');
+        covered.add(old.floor);
+    }
+    return all.slice(start, end + 1).filter(message => !covered.has(message.extra.nexus_source_floor));
+}
+
+function log(store, chatId, jobId, line) {
+    const current = store.getBatchJob(chatId, jobId);
+    if (!current || current.status !== 'running') return;
+    store.updateBatchJob(chatId, jobId, { logs: [...current.logs, line].slice(-200), currentStep: line.slice(0, 200) });
+}
+function terminate(child) {
+    if (process.platform === 'win32') execFile('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true }, () => {});
+    else { try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill(); } }
+}
+
+export function startBatch({ store, chatId, job, messages, presetId = '', connectionPresetIds = {}, spawnProcess = spawn }) {
+    if ([...running.values()].some(value => value.chatId === chatId)) throw new Error('当前聊天已有提取任务，请完成或取消后再运行。');
+    if (!Array.isArray(messages) || job.endFloor >= messages.length) throw new Error('提取范围超出当前聊天消息，请重新选择楼层。');
+    const allSources = normalizeSources(messages);
+    const selected = selectUnprocessed(allSources, store.sourceCoverage(chatId), job.startFloor, job.endFloor);
+    store.setSourceVersions(chatId, allSources.map(m => m.extra.nexus_source_version));
+    if (!selected.length) return store.updateBatchJob(chatId, job.id, { status: 'completed', progress: 100, currentStep: '该范围已保存，未重复调用模型或创建资料', completedAt: new Date().toISOString() });
+    if (!selected.some(m => !m.is_user && !m.is_system && m.mes.trim())) throw new Error('当前范围没有可提取的 AI 正文；开场和连续 AI 消息可以独立提取。');
+    const snapshot = store.captureExtractionSnapshot(chatId);
+    const presets = store.listApiPresets({ includeSecret: true }), primary = presets.find(p => p.isPrimary);
+    const mapPreset = presetId ? presets.find(p => p.id === presetId) : primary;
+    if (!mapPreset) throw new Error('请先配置主模型或识别任务的模型。');
+    const connections = {}, prepared = new Map();
+    for (const task of TASKS) {
+        const id = connectionPresetIds[task];
+        const preset = id ? presets.find(p => p.id === id) : task === 'narrative_map' ? mapPreset : primary || mapPreset;
+        if (!preset?.apiKey || !preset.model) throw new Error(`${LABELS[task]}缺少密钥或模型名称。`);
+        if (!prepared.has(preset.id)) prepared.set(preset.id, callEngine('model_profile', { ...preset, apiKey: undefined }));
+        connections[task] = { ...preset, ...prepared.get(preset.id) };
+    }
+    const sources = selected.map(m => ({ floor: m.extra.nexus_source_floor, id: m.extra.nexus_source_id, version: m.extra.nexus_source_version, role: m.is_system ? 'system' : m.is_user ? 'user' : 'assistant' }));
+    const key = digest(['nexus-extraction-3', sources]);
+    const paths = store.getPaths(chatId), runRoot = path.join(paths.chatDirectory, 'runs', job.id);
+    fs.mkdirSync(runRoot, { recursive: true });
+    const files = Object.fromEntries(['chat.jsonl', 'run.md', 'result.json', 'snapshot.json', 'profiles.json', 'prompt-overrides.json', 'workflow.json'].map(name => [name, path.join(runRoot, name)]));
+    const settings = store.getSettings();
+    fs.writeFileSync(files['chat.jsonl'], selected.map(m => JSON.stringify(m)).join('\n') + '\n');
+    fs.writeFileSync(files['snapshot.json'], JSON.stringify(snapshot));
+    fs.writeFileSync(files['prompt-overrides.json'], JSON.stringify(settings.promptOverrides || {}));
+    fs.writeFileSync(files['workflow.json'], JSON.stringify(settings.extraction || {}));
+    const prefixes = { map: 'narrative_map', event: 'event_content', create: 'entity_create', update: 'entity_update', relation: 'relation_references' };
+    fs.writeFileSync(files['profiles.json'], JSON.stringify(Object.fromEntries(Object.entries(prefixes).map(([prefix, task]) => [prefix, { transport: connections[task].transport, options: connections[task].options }]))));
+    const args = [path.join(enginePaths.projectRoot, 'tools', 'tavern_batch_runner.py'), '--result-json', files['result.json'], files['chat.jsonl'], '--endpoint', connections.narrative_map.endpoint, '--model', mapPreset.model, '--output', files['run.md'], '--snapshot', files['snapshot.json'], '--profiles', files['profiles.json'], '--cache-dir', path.join(paths.chatDirectory, 'task-cache'), '--prompt-overrides', files['prompt-overrides.json'], '--workflow', files['workflow.json'], '--batch-size', String(Math.max(1, Math.min(32, Number(settings.extraction?.batchMessages) || 8))), '--batch-chars', String(Math.max(2000, Math.min(200000, Number(settings.extraction?.batchChars) || 24000))), '--batches', String(selected.length), '--timeout', '1800'];
+    const childEnv = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8', OPENCODE_API_KEY: mapPreset.apiKey };
+    for (const [prefix, task] of Object.entries(prefixes)) {
+        const preset = connections[task], name = `NEXUS_BATCH_KEY_${prefix.toUpperCase()}`;
+        childEnv[name] = preset.apiKey;
+        args.push(`--${prefix}-endpoint`, preset.endpoint, `--${prefix}-model`, preset.model, `--${prefix}-api-key-env`, name, `--${prefix}-thinking`, preset.reasoningEffort === 'none' ? 'off' : preset.reasoningEffort || 'default');
+    }
+    const secrets = [...new Set(Object.values(connections).map(p => p.apiKey))];
+    const redact = value => secrets.reduce((text, secret) => text.split(secret).join('[已隐藏]'), String(value));
+    store.updateBatchJob(chatId, job.id, { status: 'running', progress: 0, currentStep: '正在提取；有效结果会自动缓存', startedAt: new Date().toISOString(), error: '', inputPath: files['chat.jsonl'], outputPath: files['run.md'], logs: [] });
+    const child = spawnProcess(pythonExecutable(), args, { cwd: enginePaths.projectRoot, windowsHide: true, detached: process.platform !== 'win32', env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+    running.set(job.id, { child, chatId });
+    let stderr = '', failedToStart = false;
     for (const stream of [child.stdout, child.stderr]) {
         let buffered = '';
         stream.setEncoding('utf8');
         stream.on('data', chunk => {
-            if (stream === child.stderr) stderr += chunk;
+            if (stream === child.stderr) stderr = (stderr + redact(chunk)).slice(-8000);
             buffered += chunk;
             const lines = buffered.split(/\r?\n/); buffered = lines.pop() || '';
-            for (const line of lines) if (line.trim()) appendLog(store, chatId, job.id, line);
+            for (const line of lines) if (line.trim()) log(store, chatId, job.id, redact(line.trim()));
         });
     }
     child.on('error', error => {
-        running.delete(job.id);
-        store.updateBatchJob(chatId, job.id, { status: 'failed', progress: 0, currentStep: '启动失败', error: error.message, completedAt: new Date().toISOString() });
+        failedToStart = true; running.delete(job.id);
+        store.updateBatchJob(chatId, job.id, { status: 'failed', currentStep: '执行器启动失败', error: redact(error.message), completedAt: new Date().toISOString() });
     });
     child.on('close', code => {
         running.delete(job.id);
-        if (store.getBatchJob(chatId, job.id)?.status === 'cancelled') return;
-        let result = {};
-        try { result = JSON.parse(fs.readFileSync(resultPath, 'utf8')); } catch { result = { status: 'failed', error: stderr.trim() || `提取进程退出码 ${code}` }; }
-        if (code === 0 && result.status === 'completed' && result.validation?.valid !== false) {
-            const entities = entityClosure(result.entities || [], new Set(job.entityTypes));
-            const imported = store.importEntities(chatId, entities, job.endFloor);
-            store.updateBatchJob(chatId, job.id, { status: 'completed', progress: 100, currentStep: `校验通过并写入 ${imported.saved} 个实体`, error: '', completedAt: new Date().toISOString() });
-        } else {
-            store.updateBatchJob(chatId, job.id, { status: 'failed', progress: 0, currentStep: '提取失败，可查看日志后重试', error: result.error || stderr.trim() || '正式提取或网络校验未通过。', completedAt: new Date().toISOString() });
+        if (failedToStart || store.getBatchJob(chatId, job.id)?.status === 'cancelled') return;
+        try {
+            const result = JSON.parse(fs.readFileSync(files['result.json'], 'utf8'));
+            const diagnostics = (result.diagnostics || []).map(item => `[第 ${item.batch} 批 · ${LABELS[item.task] || item.task}] ${item.message}`);
+            if (code !== 0 || result.status !== 'completed' || result.validation?.valid !== true) throw new Error(result.error || diagnostics.join('\n') || stderr || '提取或保存校验未通过');
+            store.assertSourceVersions(chatId, sources);
+            const imported = store.commitExtraction(chatId, result.entities || [], { key, jobId: job.id, startFloor: sources[0].floor, endFloor: sources.at(-1).floor, sources, snapshot, state: result.state });
+            store.updateBatchJob(chatId, job.id, { status: 'completed', progress: 100, currentStep: `已保存 ${imported.saved} 条变更${diagnostics.length ? `，有 ${diagnostics.length} 条提示待复核` : ''}`, error: '', logs: [...store.getBatchJob(chatId, job.id).logs, ...diagnostics.map(redact)].slice(-200), completedAt: new Date().toISOString() });
+        } catch (error) {
+            store.updateBatchJob(chatId, job.id, { status: 'failed', progress: 0, currentStep: '需要处理；有效结果已缓存', error: redact(error.message || stderr || `进程退出 ${code}`), completedAt: new Date().toISOString() });
         }
     });
     return store.getBatchJob(chatId, job.id);
 }
 
 export function cancelBatch(store, chatId, jobId) {
-    const child = running.get(jobId);
-    if (!child) throw new Error('该任务当前没有运行中的进程。');
-    child.kill(); running.delete(jobId);
-    return store.updateBatchJob(chatId, jobId, { status: 'cancelled', progress: 0, currentStep: '已取消', completedAt: new Date().toISOString() });
+    const active = running.get(jobId);
+    if (!active || active.chatId !== chatId) throw new Error('任务当前没有运行。');
+    store.updateBatchJob(chatId, jobId, { status: 'cancelled', progress: 0, currentStep: '已取消；已缓存结果可在重试时复用', completedAt: new Date().toISOString() });
+    terminate(active.child); running.delete(jobId);
+    return store.getBatchJob(chatId, jobId);
 }
 
-export function stopAll() { for (const child of running.values()) child.kill(); running.clear(); }
+export function stopAll() { for (const { child } of running.values()) terminate(child); running.clear(); }

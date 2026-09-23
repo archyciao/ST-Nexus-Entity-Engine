@@ -45,6 +45,8 @@ export const api = Object.freeze({
     saveEntity: (chatId, value) => request(`/entities${queryString({ chatId })}`, { method: 'PUT', body: JSON.stringify({ ...value, chatId }) }),
     deleteEntities: (chatId, ids) => request(`/entities${queryString({ chatId })}`, { method: 'DELETE', body: JSON.stringify({ chatId, ids }) }),
     mergeEntities: (chatId, ids) => request('/entities/merge', { method: 'POST', body: JSON.stringify({ chatId, ids }) }),
+    validateModelProfile: value => request('/model-profile/validate', { method: 'POST', body: JSON.stringify(value) }),
+    listFormalRelations: (chatId, entityId, offset = 0) => request(`/formal-relations${queryString({ chatId, entityId, offset, limit: 100 })}`),
     listRelations: (chatId, entityId) => request(`/relations${queryString({ chatId, entityId })}`),
     saveRelation: (chatId, value) => request(`/relations${queryString({ chatId })}`, { method: 'PUT', body: JSON.stringify({ ...value, chatId }) }),
     deleteRelation: (chatId, id) => request(`/relations/${encodeURIComponent(id)}${queryString({ chatId })}`, { method: 'DELETE', body: JSON.stringify({ chatId }) }),

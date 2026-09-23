@@ -295,7 +295,7 @@ class EventExtractionV2Tests(unittest.TestCase):
             [item["entity_key"] for item in normalized["events"][0]["entity_roster"]],
         )
 
-    def test_cross_type_name_conflict_stays_unresolved_even_with_exact_key(self) -> None:
+    def test_same_name_in_other_type_does_not_block_typed_identity(self) -> None:
         state = LEGACY.initial_unified_state()
         state["entity_candidates"] = {
             "location:青山": {
@@ -330,8 +330,8 @@ class EventExtractionV2Tests(unittest.TestCase):
         normalized = V2.normalize_narrative_map(raw, state, sources())
         roster = normalized["events"][0]["entity_roster"][0]
 
-        self.assertEqual("unresolved", roster["record_action"])
-        self.assertNotIn("existing_entity", roster)
+        self.assertEqual("update", roster["record_action"])
+        self.assertIn("existing_entity", roster)
 
     def test_unique_verbatim_fragment_recovers_boundary(self) -> None:
         raw = {
@@ -479,19 +479,19 @@ class EventExtractionV2Tests(unittest.TestCase):
         updated = LEGACY.apply_entity_candidates(state, plan)
         candidate = updated["entity_candidates"]["item:旧剑"]
         self.assertEqual(
-            {"状态": "尚可使用", "用途": "练剑"},
+            {"状态": "尚可使用"},
             candidate["semantic_fields"]["item_characteristic"],
         )
         self.assertEqual(
-            {"材质": "精钢"}, candidate["semantic_fields"]["item_profile"]
+            {"材质": "精钢", "形制": "长剑"}, candidate["semantic_fields"]["item_profile"]
         )
         self.assertEqual(
             {"材质": "凡铁", "形制": "长剑"},
             candidate["semantic_field_revisions"][0]["previous_value"],
         )
         self.assertEqual(
-            "misc_notes",
-            candidate["unclassified_field_updates"][0]["proposed_field_name"],
+            {"item_characterstic", "misc_notes"},
+            {item["proposed_field_name"] for item in candidate["unclassified_field_updates"]},
         )
 
         network, report = LEGACY.materialize_network(updated)

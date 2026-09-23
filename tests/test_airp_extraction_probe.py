@@ -13,11 +13,8 @@ ROOT = Path(__file__).resolve().parents[1]
 TOOLS = ROOT / "tools"
 if str(TOOLS) not in sys.path:
     sys.path.insert(0, str(TOOLS))
-MODULE_PATH = TOOLS / "airp_extraction_probe.py"
-SPEC = importlib.util.spec_from_file_location("airp_extraction_probe", MODULE_PATH)
-assert SPEC and SPEC.loader
-PROBE = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(PROBE)
+sys.path.insert(0, str(ROOT / "src"))
+from world_simulator_schema.extraction import legacy as PROBE
 
 
 def sample_round(number: int = 1, user: str = "甲走进山门。", assistant: str = "乙问：‘来者何人？’") -> dict:

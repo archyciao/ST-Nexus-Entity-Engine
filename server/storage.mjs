@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { collectReferences } from './references.mjs';
 
 function now() { return new Date().toISOString(); }
 
@@ -65,14 +66,17 @@ export function validateEntity(input = {}, entityTypes = []) {
 }
 
 export class NexusStore {
-    constructor({ dataRoot, entityTypes = [] } = {}) {
+    constructor({ dataRoot, entityTypes = [], components = [], validateModelProfile } = {}) {
         this.dataRoot = path.resolve(dataRoot || path.join(process.cwd(), 'data', 'default-user', 'NexusEntityEngine'));
         this.chatRoot = path.join(this.dataRoot, 'chats');
         this.configPath = path.join(this.dataRoot, 'config.sqlite');
         this.entityTypes = Object.freeze([...entityTypes]);
+        this.components = components;
+        this.validateModelProfile = validateModelProfile;
         fs.mkdirSync(this.chatRoot, { recursive: true });
         this.config = new DatabaseSync(this.configPath);
         this.chatStores = new Map();
+        this.sourceVersions = new Map();
         this.#configure(this.config);
         this.#initializeConfig();
         this.#migrateLegacyApiPresets();
@@ -97,6 +101,7 @@ export class NexusStore {
                 character_name TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL
             );
         `);
+        if (!this.config.prepare('PRAGMA table_info(api_presets)').all().some(column => column.name === 'options_json')) this.config.exec("ALTER TABLE api_presets ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'");
         if (!this.getSettings().initialized) {
             this.saveSettings({
                 initialized: true,
@@ -166,6 +171,24 @@ export class NexusStore {
                 FOREIGN KEY(target_id) REFERENCES entities(id) ON DELETE CASCADE
             );
         `);
+        entities.exec(`
+            CREATE TABLE IF NOT EXISTS engine_state(id INTEGER PRIMARY KEY CHECK(id=1), state_json TEXT NOT NULL, updated_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS extraction_commits(batch_key TEXT PRIMARY KEY, job_id TEXT NOT NULL, start_floor INTEGER NOT NULL, end_floor INTEGER NOT NULL, source_json TEXT NOT NULL, created_at TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS formal_references(source_id TEXT NOT NULL, component TEXT NOT NULL, target_id TEXT NOT NULL, target_type TEXT NOT NULL, PRIMARY KEY(source_id,component,target_id), FOREIGN KEY(source_id) REFERENCES entities(id) ON DELETE CASCADE);
+            CREATE INDEX IF NOT EXISTS idx_reference_target ON formal_references(target_id);
+        `);
+        if (this.components.length) {
+            entities.exec('BEGIN IMMEDIATE');
+            try {
+                entities.exec('DELETE FROM formal_references');
+                const insert = entities.prepare('INSERT OR IGNORE INTO formal_references VALUES(?,?,?,?)');
+                for (const row of entities.prepare('SELECT entity_json FROM entities').all()) {
+                    const entity = JSON.parse(row.entity_json);
+                    for (const ref of collectReferences(entity, this.components)) insert.run(entity.id, ref.component, ref.targetId, ref.targetType);
+                }
+                entities.exec('COMMIT');
+            } catch (error) { entities.exec('ROLLBACK'); throw error; }
+        }
         runtime.exec(`
             CREATE TABLE IF NOT EXISTS chat_state (
                 id INTEGER PRIMARY KEY CHECK(id = 1), chat_id TEXT NOT NULL, chat_name TEXT NOT NULL,
@@ -185,6 +208,8 @@ export class NexusStore {
                 detail_json TEXT NOT NULL, created_at TEXT NOT NULL
             );
         `);
+        // A restarted host cannot still own these subprocesses. Results/caches remain available.
+        runtime.prepare("UPDATE batch_jobs SET status='failed',current_step='运行被中断，可恢复重试',error='宿主已重启；已缓存的有效结果会在重试时复用。' WHERE status IN ('queued','running')").run();
         const value = { key, root, entityPath, runtimePath, entities, runtime };
         this.chatStores.set(key, value);
         return value;
@@ -218,6 +243,7 @@ export class NexusStore {
         const chatId = cleanString(input.chatId, 500);
         if (!chatId) throw new Error('当前没有可绑定的聊天。');
         const chat = this.#chatStore(chatId);
+        if (Array.isArray(input.sourceVersions)) this.setSourceVersions(chatId, input.sourceVersions);
         const timestamp = now();
         const chatName = cleanString(input.chatName || chatId, 240);
         const characterName = cleanString(input.characterName, 160);
@@ -232,6 +258,13 @@ export class NexusStore {
         return this.getDashboard(chatId);
     }
 
+    setSourceVersions(chatId, versions) { this.sourceVersions.set(chatId, versions.map(version => Array.isArray(version) ? crypto.createHash('sha256').update(JSON.stringify(version)).digest('hex') : String(version))); }
+
+    assertSourceVersions(chatId, sources) {
+        const versions = this.sourceVersions.get(chatId);
+        if (!versions || sources.some(source => versions[source.floor] !== source.version)) throw new Error('提取期间原消息发生变化；结果已缓存但没有写入，请复核来源后重试。');
+    }
+
     getDashboard(chatId) {
         const chat = this.#chatStore(chatId);
         const state = chat.runtime.prepare('SELECT * FROM chat_state WHERE id = 1').get() || null;
@@ -242,11 +275,11 @@ export class NexusStore {
         const interval = Math.max(1, Number(extraction.floorInterval) || 10);
         const retainTail = Math.max(0, Number(extraction.retainTail) || 4);
         const messageCount = Number(state?.message_count || 0);
-        const extractedThrough = Number(state?.extracted_through || 0);
+        const extractedThrough = this.coveredThrough(chatId);
         return {
             chat: state ? { id: state.chat_id, name: state.chat_name, characterName: state.character_name, messageCount } : null,
             entityTotal: Object.values(entityByType).reduce((sum, count) => sum + count, 0), entityByType,
-            extractedThrough, unextractedCount: Math.max(0, messageCount - retainTail - extractedThrough),
+            extractedThrough, unextractedCount: Math.max(0, messageCount - retainTail - (extractedThrough + 1)),
             nextTriggerFloor: extractedThrough + interval + retainTail,
             workflow: { stage: state?.workflow_stage || 'idle', progress: Number(state?.workflow_progress || 0) },
             extraction: { floorInterval: interval, retainTail }, paths: this.getPaths(chatId),
@@ -274,13 +307,23 @@ export class NexusStore {
             return { valid: false, conflict: true, errors: [{ path: '/', field: '_form', message: '实体已在其他位置更新，请刷新后再保存。' }] };
         }
         const timestamp = now(); const name = entityName(entity); const description = cleanString(entity.description, 12000);
-        if (existing) {
-            db.prepare(`UPDATE entities SET type=?,name=?,description=?,entity_json=?,revision=revision+1,updated_at=? WHERE id=?`)
-                .run(entity.type, name, description, JSON.stringify(entity), timestamp, entity.id);
-        } else {
-            db.prepare(`INSERT INTO entities(id,type,name,description,entity_json,revision,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)`)
-                .run(entity.id, entity.type, name, description, JSON.stringify(entity), timestamp, timestamp);
+        if (existing && existing.type !== entity.type) throw new Error('既有资料的类型不能直接改变，请创建新资料并显式整理引用。');
+        for (const reference of collectReferences(entity, this.components)) {
+            const target = reference.targetId === entity.id ? entity : this.getEntity(chatId, reference.targetId);
+            if (target?.type !== reference.targetType) throw new Error('引用目标不存在或类型不符，请先建立对应资料。');
         }
+        db.exec('BEGIN IMMEDIATE');
+        try {
+            if (existing) {
+                db.prepare(`UPDATE entities SET type=?,name=?,description=?,entity_json=?,revision=revision+1,updated_at=? WHERE id=?`)
+                    .run(entity.type, name, description, JSON.stringify(entity), timestamp, entity.id);
+            } else {
+                db.prepare(`INSERT INTO entities(id,type,name,description,entity_json,revision,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?)`)
+                    .run(entity.id, entity.type, name, description, JSON.stringify(entity), timestamp, timestamp);
+            }
+            this.updateReferences(chatId, entity);
+            db.exec('COMMIT');
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
         this.audit(chatId, 'entity', existing ? 'update' : 'create', { id: entity.id, type: entity.type, name });
         return { valid: true, entity: this.getEntity(chatId, entity.id) };
     }
@@ -296,6 +339,7 @@ export class NexusStore {
                     ON CONFLICT(id) DO UPDATE SET type=excluded.type,name=excluded.name,description=excluded.description,
                     entity_json=excluded.entity_json,revision=entities.revision+1,updated_at=excluded.updated_at`)
                     .run(entity.id, entity.type, name, description, JSON.stringify(entity), timestamp, timestamp);
+                this.updateReferences(chatId, entity);
                 saved += 1;
             }
             chat.entities.exec('COMMIT');
@@ -305,8 +349,86 @@ export class NexusStore {
         return { saved };
     }
 
+    updateReferences(chatId, entity) {
+        const db = this.#chatStore(chatId).entities;
+        db.prepare('DELETE FROM formal_references WHERE source_id=?').run(entity.id);
+        const insert = db.prepare('INSERT OR IGNORE INTO formal_references VALUES(?,?,?,?)');
+        for (const ref of collectReferences(entity, this.components)) insert.run(entity.id, ref.component, ref.targetId, ref.targetType);
+    }
+
+    listFormalRelations(chatId, entityId, { offset = 0, limit = 100 } = {}) {
+        const db = this.#chatStore(chatId).entities;
+        const total = Number(db.prepare('SELECT COUNT(*) AS count FROM formal_references WHERE source_id=? OR target_id=?').get(entityId, entityId).count);
+        const rows = db.prepare(`SELECT r.*, s.name AS source_name,s.type AS source_type,t.name AS target_name FROM formal_references r JOIN entities s ON s.id=r.source_id LEFT JOIN entities t ON t.id=r.target_id WHERE r.source_id=? OR r.target_id=? ORDER BY r.source_id,r.component,r.target_id LIMIT ? OFFSET ?`).all(entityId, entityId, Math.max(1,Math.min(200,Number(limit)||100)), Math.max(0,Number(offset)||0));
+        return { total, items: rows.map(row => { const outgoing = row.source_id === entityId; return { id: outgoing ? row.target_id : row.source_id, type: outgoing ? row.target_type : row.source_type, name: outgoing ? row.target_name || row.target_id : row.source_name, outgoing, component: row.component, resolved: outgoing ? Boolean(row.target_name) : true }; }) };
+    }
+
+    captureExtractionSnapshot(chatId) {
+        const db = this.#chatStore(chatId).entities;
+        const entities = db.prepare('SELECT * FROM entities ORDER BY id').all().map(entityFromRow);
+        const state = parseJson(db.prepare('SELECT state_json FROM engine_state WHERE id=1').get()?.state_json, null);
+        const fingerprint = crypto.createHash('sha256').update(JSON.stringify([entities.map(e => [e.id,e.revision]), state])).digest('hex');
+        return { entities, state, fingerprint };
+    }
+
+    getCommit(chatId, batchKey) { return this.#chatStore(chatId).entities.prepare('SELECT * FROM extraction_commits WHERE batch_key=?').get(batchKey) || null; }
+
+    coveredThrough(chatId) {
+        let cursor = -1;
+        for (const row of this.#chatStore(chatId).entities.prepare('SELECT start_floor,end_floor FROM extraction_commits ORDER BY start_floor').all()) {
+            if (row.start_floor > cursor + 1) break;
+            cursor = Math.max(cursor,row.end_floor);
+        }
+        return cursor;
+    }
+
+    sourceCoverage(chatId) {
+        return this.#chatStore(chatId).entities.prepare('SELECT batch_key,start_floor,end_floor,source_json FROM extraction_commits ORDER BY start_floor').all().map(row => ({ key: row.batch_key, start: row.start_floor, end: row.end_floor, sources: parseJson(row.source_json, []) }));
+    }
+
+    commitExtraction(chatId, entities, { key, jobId, startFloor, endFloor, sources, snapshot, state }) {
+        const chat = this.#chatStore(chatId), db = chat.entities;
+        if (!state || typeof state !== 'object' || !Array.isArray(entities) || !Array.isArray(sources) || !sources.length || !Number.isInteger(startFloor) || !Number.isInteger(endFloor) || endFloor < startFloor) throw new Error('提取结果缺少有效状态或来源范围');
+        const network = new Map(entities.map(entity => [entity.id, entity]));
+        if (network.size !== entities.length) throw new Error('提取结果包含重复编号');
+        for (const entity of entities) {
+            if (!validateEntity(entity, this.entityTypes).valid) throw new Error('提取结果的实体格式无效');
+            for (const reference of collectReferences(entity, this.components)) {
+                if (network.get(reference.targetId)?.type !== reference.targetType) throw new Error('提取结果含有未保存或类型不符的引用目标');
+            }
+        }
+        db.exec('BEGIN IMMEDIATE');
+        let saved = 0;
+        try {
+            if (this.getCommit(chatId,key)) { db.exec('COMMIT'); return { saved: 0, reused: true, extractedThrough: this.coveredThrough(chatId) }; }
+            if (this.captureExtractionSnapshot(chatId).fingerprint !== snapshot.fingerprint) throw new Error('提取期间资料已改变；结果已保留，请复核后重试，未覆盖人工编辑。');
+            const timestamp = now();
+            const upsert = db.prepare(`INSERT INTO entities(id,type,name,description,entity_json,revision,created_at,updated_at) VALUES(?,?,?,?,?,1,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,entity_json=excluded.entity_json,revision=entities.revision+1,updated_at=excluded.updated_at`);
+            for (const entity of entities) {
+                if (!entity?.id || !this.entityTypes.includes(entity.type)) throw new Error('提取结果包含无效实体类型');
+                const previous = this.getEntity(chatId,entity.id);
+                if (previous && previous.type !== entity.type) throw new Error('提取结果不能改变既有实体的类型');
+                if (previous && JSON.stringify(previous.entity) === JSON.stringify(entity)) continue;
+                upsert.run(entity.id,entity.type,entityName(entity),cleanString(entity.description,12000),JSON.stringify(entity),timestamp,timestamp);
+                this.updateReferences(chatId,entity); saved++;
+            }
+            db.prepare('INSERT INTO engine_state VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at').run(JSON.stringify(state),timestamp);
+            db.prepare('INSERT INTO extraction_commits VALUES(?,?,?,?,?,?)').run(key,jobId,startFloor,endFloor,JSON.stringify(sources),timestamp);
+            db.exec('COMMIT');
+        } catch (error) { db.exec('ROLLBACK'); throw error; }
+        // Progress is a projection of receipts committed in the same DB as facts.
+        const extractedThrough = this.coveredThrough(chatId);
+        // Runtime is a disposable projection. Facts and receipts are already durable.
+        try { chat.runtime.prepare("UPDATE chat_state SET extracted_through=?,updated_at=? WHERE id=1").run(extractedThrough,now()); } catch { /* rebuilt from receipts on the next dashboard read */ }
+        return { saved, extractedThrough };
+    }
+
     deleteEntities(chatId, ids = []) {
         const db = this.#chatStore(chatId).entities; const cleanIds = cleanStringList(ids, 500);
+        const state = this.captureExtractionSnapshot(chatId).state;
+        if (state && cleanIds.some(id => Object.values(state.id_maps || {}).some(map => Object.values(map || {}).includes(id)))) throw new Error('这批资料仍被提取来源记录使用，暂不能直接删除。请先导出备份；需要重新构建时使用当前聊天的数据重置。');
+        const references = db.prepare('SELECT source_id,target_id FROM formal_references').all();
+        if (references.some(ref => cleanIds.includes(ref.target_id) && !cleanIds.includes(ref.source_id))) throw new Error('其他资料仍引用这些条目，请先在关联资料中解除正式引用。');
         db.exec('BEGIN IMMEDIATE');
         try { const statement = db.prepare('DELETE FROM entities WHERE id = ?'); let deleted = 0; for (const id of cleanIds) deleted += Number(statement.run(id).changes || 0); db.exec('COMMIT'); this.audit(chatId, 'entity', 'delete', { ids: cleanIds }); return { deleted }; }
         catch (error) { db.exec('ROLLBACK'); throw error; }
@@ -317,6 +439,11 @@ export class NexusStore {
         const entities = cleanIds.map(id => this.getEntity(chatId, id)).filter(Boolean);
         if (entities.length !== cleanIds.length || new Set(entities.map(item => item.type)).size !== 1) throw new Error('只能合并同一类型且仍存在的实体。');
         const [target, ...sources] = entities.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+        const state = this.captureExtractionSnapshot(chatId).state;
+        const hasExtractionState = state && cleanIds.some(id => Object.values(state.id_maps || {}).some(map => Object.values(map || {}).includes(id)));
+        const hasData = entities.some(item => Object.keys(item.entity.components || {}).some(name => !['identity', 'entity_management'].includes(name)));
+        const hasReferences = this.#chatStore(chatId).entities.prepare('SELECT source_id,target_id FROM formal_references').all().some(ref => cleanIds.includes(ref.target_id) || cleanIds.includes(ref.source_id));
+        if (hasExtractionState || hasData || hasReferences) throw new Error('这些资料含字段、正式引用或提取来源，自动合并可能丢失信息。请先逐项整理；当前仅允许合并独立的基础名片。');
         const merged = structuredClone(target.entity);
         merged.description = [...new Set(entities.map(item => item.description).filter(Boolean))].join('\n\n');
         const identity = merged.components?.identity?.data;
@@ -359,13 +486,14 @@ export class NexusStore {
         return this.config.prepare('SELECT * FROM api_presets ORDER BY is_primary DESC,updated_at DESC').all().map(row => ({
             id: row.id, name: row.name, provider: row.provider, baseUrl: row.base_url,
             ...(includeSecret ? { apiKey: row.api_key } : {}), hasApiKey: Boolean(row.api_key), model: row.model,
-            transport: row.transport, reasoningEffort: row.reasoning_effort, isPrimary: Boolean(row.is_primary),
+            options: parseJson(row.options_json, {}), transport: row.transport, reasoningEffort: row.reasoning_effort, isPrimary: Boolean(row.is_primary),
         }));
     }
 
     getApiPreset(id, { includeSecret = false } = {}) { return this.listApiPresets({ includeSecret }).find(item => item.id === id) || null; }
 
     saveApiPreset(input = {}) {
+        const modelProfile = this.validateModelProfile ? this.validateModelProfile(input) : { options: input.options || {} };
         const name = cleanString(input.name, 120); const baseUrl = cleanString(input.baseUrl, 600);
         if (!name || !baseUrl) throw new Error('预设名称和 API 地址不能为空。');
         let parsed; try { parsed = new URL(baseUrl); } catch { throw new Error('API 地址格式不正确。'); }
@@ -377,6 +505,7 @@ export class NexusStore {
         this.config.prepare(`INSERT INTO api_presets(id,name,provider,base_url,api_key,model,transport,reasoning_effort,is_primary,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)
             ON CONFLICT(id) DO UPDATE SET name=excluded.name,provider=excluded.provider,base_url=excluded.base_url,api_key=excluded.api_key,model=excluded.model,transport=excluded.transport,reasoning_effort=excluded.reasoning_effort,is_primary=excluded.is_primary,updated_at=excluded.updated_at`)
             .run(id, name, cleanString(input.provider || 'openai_compatible', 80), baseUrl, cleanString(input.apiKey, 600) || oldKey, cleanString(input.model, 200), cleanString(input.transport || 'chat_completions', 80), cleanString(input.reasoningEffort || 'none', 30), input.isPrimary ? 1 : 0, timestamp, timestamp);
+        this.config.prepare('UPDATE api_presets SET options_json=? WHERE id=?').run(JSON.stringify(modelProfile.options || {}), id);
         return this.getApiPreset(id);
     }
 
@@ -388,6 +517,7 @@ export class NexusStore {
         const chatId = cleanString(input.chatId, 500); const chat = this.#chatStore(chatId);
         const startFloor = Math.max(0, Number(input.startFloor) || 0); const endFloor = Math.max(0, Number(input.endFloor) || 0);
         const entityTypes = cleanStringList(input.entityTypes, this.entityTypes.length, 50).filter(type => this.entityTypes.includes(type));
+        if (!Number.isInteger(startFloor) || !Number.isInteger(endFloor)) throw new Error('楼层必须是整数。');
         if (endFloor < startFloor) throw new Error('结束楼层不能小于开始楼层。'); if (!entityTypes.length) throw new Error('至少选择一种实体类型。');
         const id = `batch_${crypto.randomUUID()}`; const timestamp = now();
         chat.runtime.prepare(`INSERT INTO batch_jobs(id,start_floor,end_floor,entity_types_json,status,progress,current_step,created_at,updated_at) VALUES(?,?,?,?, 'queued',0,'等待执行',?,?)`).run(id, startFloor, endFloor, JSON.stringify(entityTypes), timestamp, timestamp);
@@ -408,7 +538,8 @@ export class NexusStore {
     }
 
     resetChat(chatId) {
-        const chat = this.#chatStore(chatId); chat.entities.exec('DELETE FROM relations; DELETE FROM entities;'); chat.runtime.exec('DELETE FROM batch_jobs; DELETE FROM audit_log; UPDATE chat_state SET extracted_through=0,workflow_stage=\'idle\',workflow_progress=0,updated_at=datetime(\'now\') WHERE id=1;');
+        if (this.listBatchJobs(chatId).some(job => ['queued','running'].includes(job.status))) throw new Error('请先取消当前聊天的提取任务，再重置数据。');
+        const chat = this.#chatStore(chatId); chat.entities.exec('BEGIN IMMEDIATE; DELETE FROM extraction_commits; DELETE FROM engine_state; DELETE FROM relations; DELETE FROM entities; COMMIT;'); chat.runtime.exec('DELETE FROM batch_jobs; DELETE FROM audit_log; UPDATE chat_state SET extracted_through=0,workflow_stage=\'idle\',workflow_progress=0,updated_at=datetime(\'now\') WHERE id=1;');
         return { deleted: true, paths: this.getPaths(chatId) };
     }
 

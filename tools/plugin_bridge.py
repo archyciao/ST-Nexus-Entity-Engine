@@ -33,6 +33,7 @@ from world_simulator_schema.event_extraction_v2 import (  # noqa: E402
     RELATION_REFERENCE_SYSTEM_PROMPT,
 )
 from world_simulator_schema.schema_store import SchemaStore  # noqa: E402
+from world_simulator_schema.extraction.protocols import CAPABILITIES, options_for, endpoint_for, build_request
 
 
 PROMPTS = (
@@ -104,6 +105,7 @@ def metadata() -> dict[str, Any]:
     entity_types = [dict(item) for item in CURRENT_ENTITY_TYPES if item["id"] in registered_types]
     return {
         "engine": "NexusEntityEngine",
+        "modelCapabilities": CAPABILITIES,
         "registryVersion": store.component_registry.get("registry_version"),
         "entityTypes": entity_types,
         "components": _component_metadata(store),
@@ -177,7 +179,16 @@ COMMANDS = {
     "metadata": lambda _payload: metadata(),
     "prepare_entity": prepare_entity,
     "validate_entity": validate_entity,
+    "model_profile": lambda payload: model_profile(payload),
 }
+
+
+def model_profile(payload):
+    protocol = str(payload.get("transport") or "chat_completions")
+    options = options_for(payload.get("options"), protocol)
+    endpoint = endpoint_for(str(payload.get("baseUrl") or ""), protocol, str(payload.get("model") or "model"))
+    _, _, body = build_request(endpoint, "validation-only", str(payload.get("model") or "model"), "", "", transport=protocol, options=options, effort=str(payload.get("reasoningEffort") or "default"), max_tokens=options["maxOutputTokens"])
+    return {"options": options, "endpoint": endpoint, "parameters": {key: value for key, value in body.items() if key not in {"messages", "input", "instructions", "system", "contents", "systemInstruction"}}}
 
 
 def main() -> int:

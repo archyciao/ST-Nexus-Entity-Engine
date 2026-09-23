@@ -8,11 +8,6 @@ export const PROVIDERS = Object.freeze([
     { id: 'opencode_zen', label: 'OpenCode Zen' },
 ]);
 
-export const REASONING_LEVELS = Object.freeze([
-    { id: 'none', label: '关闭' }, { id: 'low', label: '低' },
-    { id: 'medium', label: '中' }, { id: 'high', label: '高' }, { id: 'max', label: '最高' },
-]);
-
 export function detectProvider(url = '') {
     const value = String(url).toLowerCase();
     if (value.includes('opencode') || value.includes('zen')) return 'opencode_zen';
@@ -23,14 +18,6 @@ export function detectProvider(url = '') {
 }
 
 export function providerLabel(id) { return PROVIDERS.find(item => item.id === id)?.label || id; }
-
-export function reasoningPayload(provider, effort) {
-    if (provider === 'opencode_zen') return effort === 'none' ? { thinking: { type: 'disabled' }, reasoning_effort: 'none' } : { reasoning_effort: effort };
-    if (provider === 'openai') return { reasoning: { effort } };
-    if (provider === 'anthropic') return effort === 'none' ? { thinking: { type: 'disabled' } } : { thinking: { type: 'enabled', budget_tokens: effort === 'high' || effort === 'max' ? 8192 : 4096 } };
-    if (provider === 'gemini') return { generationConfig: { thinkingConfig: { thinkingBudget: effort === 'none' ? 0 : effort === 'high' || effort === 'max' ? 8192 : 4096 } } };
-    return effort === 'none' ? { reasoning_effort: 'none' } : { reasoning_effort: effort };
-}
 
 export function escapeHtml(value) {
     return String(value ?? '').replace(/[&<>'"]/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' })[character]);
